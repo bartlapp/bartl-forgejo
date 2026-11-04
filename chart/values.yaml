@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# build.sh replaces this with the retained OCI candidate digest.
+image: ""
+identity:
+  installation: ""
+  instance: ""
+version: "17.0.1"
+replicas: 1
+claim: ""
+stagingClaim: ""
+configurationSecret: ""
+bootstrapSecret: ""
+backup: {}
+# backup:
+#   repository: rest:https://backup.example/forgejo/
+#   readerSecret: forgejo-backup-reader
+#   writerSecret: forgejo-backup-writer
+#   schedule: "0 2 * * *"
+#   timeZone: UTC
+ingress:
+  enabled: false
+  host: ""
+  className: ""
+  tlsSecret: ""
+ssh:
+  port: 2222
+controller:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

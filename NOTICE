@@ -1,0 +1,33 @@
+bartl-forgejo
+Copyright 2026 Florian Kessler GmbH
+
+The authored operating package (controller, worker, Helm chart, build procedure
+and documentation) is licensed under the Apache License, Version 2.0. See LICENSE.
+
+The combined image aggregates independent upstream programs. This package's
+Apache license does not replace their licenses or upstream copyright notices.
+
+Forgejo 16.0.7 and 17.0.1 are distributed under GNU GPL version 3 or later,
+not AGPL. Upstream's exact-version README and LICENSE state these terms:
+https://codeberg.org/forgejo/forgejo/src/tag/v16.0.7/README.md
+https://codeberg.org/forgejo/forgejo/src/tag/v17.0.1/README.md
+https://codeberg.org/forgejo/forgejo/src/tag/v17.0.1/LICENSE
+The image retains unmodified upstream LICENSE copies at
+/usr/local/share/licenses/forgejo/LICENSE-16.0.7 and LICENSE-17.0.1, and source
+archives at /usr/local/share/forgejo-source/forgejo-VERSION.tar.gz.
+The corresponding exact-version upstream source is also available at:
+https://codeberg.org/forgejo/forgejo/archive/v16.0.7.tar.gz
+https://codeberg.org/forgejo/forgejo/archive/v17.0.1.tar.gz
+When distributing the image, provide equivalent access to this corresponding
+source alongside the binaries and retain upstream third-party notices. The
+source archives are retained in the image for source availability independent
+of the upstream site. No Forgejo source modifications are made by this package.
+
+Restic 0.19.1 is BSD-2-Clause licensed. Its binary includes independently
+licensed dependencies; upstream copyright/license and dependency notices:
+https://github.com/restic/restic/blob/v0.19.1/LICENSE
+https://github.com/restic/restic/tree/v0.19.1
+Debian runtime components, including Git, retain their own licenses and copyright
+notices in /usr/share/doc in the image. Go dependencies retain their own licenses
+in their exact go.mod/go.sum identified sources. Deliver those notices with
+redistributed binaries; the build retains module license files in the image.

@@ -1,0 +1,34 @@
+{{- if ne .Release.Name "forgejo" }}
+{{- fail "Install release forgejo; choose one logical instance per namespace" }}
+{{- end }}
+{{- if not (regexMatch "^[^ @]+@sha256:[a-f0-9]{64}$" .Values.image) }}
+{{- fail "image must be an immutable repository@sha256 digest; use the built chart or candidate image-values.yaml" }}
+{{- end }}
+{{- if eq .Values.claim .Values.stagingClaim }}
+{{- fail "claim and stagingClaim must be distinct external claims" }}
+{{- end }}
+apiVersion: forgejo.bartl.sh/v1alpha1
+kind: ForgejoApplication
+metadata:
+  name: forgejo
+  namespace: {{ .Release.Namespace }}
+spec:
+  identity:
+    installation: {{ required "identity.installation is required" .Values.identity.installation | quote }}
+    instance: {{ required "identity.instance is required" .Values.identity.instance | quote }}
+  version: {{ .Values.version | quote }}
+  replicas: {{ .Values.replicas }}
+  claim: {{ required "claim is required" .Values.claim | quote }}
+  stagingClaim: {{ required "stagingClaim is required" .Values.stagingClaim | quote }}
+  configurationSecret: {{ required "configurationSecret is required" .Values.configurationSecret | quote }}
+  {{- with .Values.bootstrapSecret }}
+  bootstrapSecret: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.backup }}
+  backup:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ingress:
+    {{- toYaml .Values.ingress | nindent 4 }}
+  ssh:
+    port: {{ .Values.ssh.port }}
