@@ -1,0 +1,34 @@
+# Credentials and local lab state (LAB_STATE_DIR must live outside this checkout).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_ed25519*
+known_hosts
+ssh_config
+lab.json
+.lab/
+lab-state/
+
+# Dependencies, caches, mutable state, build products and raw qualification output.
+node_modules/
+.cache/
+build/
+dist/
+coverage/
+artifacts/
+evidence/
+work/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.tar
+*.tar.gz
+*.tar.xz
+*.tgz
+*.oci
+.DS_Store
