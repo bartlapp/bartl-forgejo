@@ -21,13 +21,13 @@ Restic 0.19.1 can report snapshot listing errors on stderr while returning exit 
 
 | Artifact | Immutable identity |
 | --- | --- |
-| Image | `ghcr.io/bartlapp/bartl-forgejo@sha256:e6b4eae6d8b832d0465fdfd12efae57f0cce1bb7de61d6b26b6d4ff67db7f929` |
-| Chart | `oci://ghcr.io/bartlapp/charts/bartl-forgejo@sha256:f0edf79ae2462108151db48a159492826bdaecaf8397f7d8ce15cb4cd05b258e` |
-| Chart archive SHA256 | `0599c236db3f38ffa0451e67623a10e40314e24791f84a2c31ad0b9f4014259b` |
+| Image | `ghcr.io/bartlapp/bartl-forgejo-controller@sha256:e6b4eae6d8b832d0465fdfd12efae57f0cce1bb7de61d6b26b6d4ff67db7f929` |
+| Chart | `oci://ghcr.io/bartlapp/bartl-forgejo@sha256:c9d6e7189d29b7b2923a61c5036e38197005912fdd68c6acec6a78654e297f3c` |
+| Chart archive SHA256 | `9cea9c65c1bcd111ea86181103cba22b6e86f36f1b9f0e8778ca3449c256f067` |
 | Build source tree | `5093bae8bf1aa30e24f4d9187284aeb2121e3eaf` |
 | Build source archive SHA256 | `9dc5553a50b122055110ebb257def54a1d8cb165ee24ae7a62dd0abb1c83b2f1` |
 
-The exact build tree remains reachable at `refs/evidence/candidate-05-source`. Qualification used `tests/package-proof.mjs`; its final removal continuation binds the preceding fourteen passed cases to the same image, chart and source identities. The published artifacts are those tested bytes, not a rebuild. Registry visibility is currently private pending the authorized public-visibility change.
+The exact image build tree remains reachable at `refs/evidence/candidate-05-source`. Qualification used `tests/package-proof.mjs`; its final removal continuation binds the preceding fourteen passed cases to the same image and source identities. The image was not rebuilt. The chart was repackaged solely to reference the consistent `bartl-forgejo-controller` image name; installation from its published digest, current-generation readiness and access to restored repository content were then verified on Hetzner. Registry visibility is currently private pending the authorized public-visibility change.
 
 The qualified placement was one K3s node with independent per-slot volumes and synthetic data. These results establish application reconstruction and planned replacement, not host/provider-loss recovery or production-scale interruption limits. `tests/native.sh` and `tests/native-fixture.mjs` retain the underlying native recipe.
 
@@ -73,7 +73,7 @@ A stopped capture includes the owned native filesystem and identity/version/inve
 Use the retained digest-pinned chart from the selected package. The source chart deliberately rejects an unpinned image. Provision ingress/TLS, SSH TCP exposure, DNS and backup reachability in the installation infrastructure; an HTTP Ingress does not expose SSH. The controller owns its application Service and optional Ingress. Do not scale generated Deployments or run a second writer.
 
 ```sh
-CHART=oci://ghcr.io/bartlapp/charts/bartl-forgejo@sha256:f0edf79ae2462108151db48a159492826bdaecaf8397f7d8ce15cb4cd05b258e
+CHART=oci://ghcr.io/bartlapp/bartl-forgejo@sha256:c9d6e7189d29b7b2923a61c5036e38197005912fdd68c6acec6a78654e297f3c
 kubectl create namespace forgejo
 # Provision the two claims and protected Secrets from installation-controlled inputs.
 helm upgrade --install forgejo "$CHART" \
@@ -167,8 +167,8 @@ After separate publication authorization and successful exact-candidate qualific
 
 ```sh
 skopeo copy --preserve-digests oci:/srv/retained/forgejo-candidate/image:candidate \
-  docker://ghcr.io/bartlapp/bartl-forgejo:QUALIFIED_PACKAGE_TAG
-helm push /srv/retained/forgejo-candidate/bartl-forgejo-0.1.0.tgz oci://ghcr.io/bartlapp/charts
+  docker://ghcr.io/bartlapp/bartl-forgejo-controller:QUALIFIED_PACKAGE_TAG
+helm push /srv/retained/forgejo-candidate/bartl-forgejo-0.1.0.tgz oci://ghcr.io/bartlapp
 ```
 
 Verify the registry digest against `image.digest` and retain the chart checksum, source archive/tree identity and qualification identity with the release. The chart continues to select the digest, never the mutable publication tag. Publishing is not part of `build.sh`.

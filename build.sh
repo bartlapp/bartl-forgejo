@@ -24,7 +24,7 @@ rm "$GIT_INDEX_FILE"
 unset GIT_INDEX_FILE
 git archive --format=tar "$SOURCE_TREE" | tar -xf - -C "$SNAPSHOT"
 RELEASE=$(yq -r '.version' "$SNAPSHOT/chart/Chart.yaml")
-IMAGE_REPOSITORY=${IMAGE_REPOSITORY:-ghcr.io/bartlapp/bartl-forgejo}
+IMAGE_REPOSITORY=${IMAGE_REPOSITORY:-ghcr.io/bartlapp/bartl-forgejo-controller}
 CANDIDATE="$IMAGE_REPOSITORY:$RELEASE-$SOURCE_TREE"
 OUT=${OUT:-$ROOT/dist}
 # An existing destination is never rebuilt or overwritten. Retain it through qualification/publication.
