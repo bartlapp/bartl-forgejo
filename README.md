@@ -15,6 +15,8 @@ Release 0.1.0 was qualified on Hetzner with K3s 1.36.5, Helm 4.3.1, Bartlized Re
 
 Failure qualification covered malformed backup lookup, corrupt selected recovery data, interrupted preparation, stop taking precedence, publication failure/retry, and downgrade refusal without changing native files or recovery inputs. Planned removal completed pending publication before uninstall; retained-state reinstall produced another backup whose newly written Git files, issue and package were recovered independently.
 
+In the final retained-state reinstall check, the subsequent backup recorded 15.651 seconds of observed serving-Pod readiness interruption, with a polling upper bound of 17.087 seconds. This measures the synthetic fixture on the qualified single-node placement, not end-user availability or a production interruption guarantee.
+
 Restic 0.19.1 can report snapshot listing errors on stderr while returning exit status zero and an empty or partial JSON list. The package therefore requires both successful exit and a clean diagnostic channel before interpreting backup absence. It retains native filtering and locking rather than adding another enumeration engine.
 
 ### Release artifacts
@@ -62,6 +64,8 @@ ssh:
 
 Create the namespace and inputs before installation. Both claims are operator-owned, distinct, filesystem volumes writable by UID/GID 1000 with fsGroup 1000. Allocate state capacity for repositories, LFS, SQLite, attachments, packages, releases, indexes, native queue state and logs. Allocate staging capacity for a complete independent capture plus integrity metadata; retain headroom for reconstruction and native upgrade. The package never deletes either claim or supplied Secrets. Storage must support native SQLite locking and exclusive single-instance writes. Concurrent mounts by another writer are forbidden, regardless of PVC access mode.
 
+The full staging copy lets Forgejo resume while Restic publishes the capture and preserves that capture for retry if publication fails. This trades additional local copy work and capacity for a complete second copy of the owned state against keeping the service stopped throughout publication. It is this package's capture strategy, not a general Bartl requirement.
+
 The configuration Secret contains `app.ini`. Set native paths under `/data`: work path `/data`, `APP_DATA_PATH=/data/data`, SQLite `/data/data/forgejo.db`, repositories `/data/data/repositories`, SSH keys `/data/data/ssh`; keep every configured mutable path within the owned volume. Configure native HTTP port 3000 and builtin SSH port 2222, public `ROOT_URL`, SSH domain and advertised port, and `RUN_USER=git`. Preserve `SECRET_KEY`, `INTERNAL_TOKEN`, `LFS_JWT_SECRET` and any external secret references independently. Target-specific URLs and configuration are supplied separately from the recovery point. The worker enforces the supported disabled-effects profile and resolves effective native configuration. Do not depend on unsupported paths or effects.
 
 Optional bootstrap Secret keys are `username`, `password`, `email`; it creates a new installation administrator, not a startup dependency for recovered state. Backup reader/writer Secrets each contain `password` (same Restic repository encryption password), `username`, `restPassword`, and optionally `ca.crt`. Credentials are delivered only to the jobs needing them, never to the serving process. Reader access must permit reads and native Restic lock creation/removal; writer access must be append-only. Independently provision repository initialization, retention, destructive maintenance, monitoring and recovery keys. No backup configuration means an empty target initializes natively; a configured empty repository does likewise. Lookup or integrity failure never means absence.
@@ -107,7 +111,7 @@ For planned promotion: arrange the accepted interruption and data-loss boundary;
 Ordinary stop is always allowed, including during pending or failed backup publication. Declare it through the application interface, not the generated Deployment:
 
 ```sh
-helm upgrade forgejo ./bartl-forgejo-0.1.0.tgz --namespace forgejo \
+helm upgrade forgejo "$CHART" --namespace forgejo \
   --values installation-values.yaml --set replicas=0
 kubectl -n forgejo wait forgejoapplication/forgejo --for=condition=Stopped --timeout=20m
 ```
