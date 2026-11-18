@@ -89,6 +89,8 @@ FORGEJO_HOST=$(INSTANCE="$INSTANCE" yq -er '.services[strenv(INSTANCE)].endpoint
 
 Public paths are `services.<instance>.endpoints.{https,ssh}`, `oidc.requests.<instance>`, `backup.requests.<instance>`, `credentials.{requirements,bindings}.<instance>` and `storage.claims.<instance>.{state,staging}`. They declare requirements, not already issued credentials, clients or repositories. Rerender after changing choices.
 
+Unreleased source correction: `backup.requests.<instance>.enabled` consistently means eligibility for connection preparation: omission is eligible, explicit `backup.enabled: false` opts out. Conditional reader/writer requirements describe what a selected backup needs, not credentials to create for an unbound application. Standalone deployment without a destination still has no backup; `enabled: true` in service choices requires a destination. Released 0.2.2 declares an omitted choice ineligible; the correction needs a new chart release and is not covered by that release's qualification.
+
 Create two distinct operator-owned filesystem PVCs, writable by UID/GID 1000 with fsGroup 1000, supporting SQLite locks, atomic rename and fsync. State holds repositories, LFS, SQLite, attachments, packages, releases, indexes, queues and logs. Staging holds a complete independent capture plus integrity metadata and failed-publication headroom. These example 20Gi capacities are lab choices, not production sizing:
 
 ```bash

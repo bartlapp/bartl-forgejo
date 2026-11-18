@@ -72,6 +72,21 @@ check('OIDC unknown protected fields and ambiguous issuer fail', () => {
   for (const oidc of [{}, {issuer: 'http://insecure.example'}, {issuer: 'https://issuer.example', clientSecret: 'plaintext'}]) { const v = base(); service(v).oidc = oidc; rejects(v); }
   const v = base(); service(v).identityProvider = 'accounts'; service(v).oidc = {issuer: 'https://issuer.example'}; rejects(v, {mode: 'connections'});
 });
+check('backup eligibility does not activate an unbound deployment and explicit opt-out wins', () => {
+  const v = base();
+  const eligible = declaration(v);
+  assert.equal(eligible.backup.requests.forgejo.enabled, true);
+  assert.equal(eligible.backup.requests.forgejo.repository, undefined);
+  assert.deepEqual(eligible.credentials.requirements.forgejo.backupReader.keys, ['password', 'username', 'restPassword']);
+  assert.equal(spec(v).backup, undefined);
+  service(v).backup = {enabled: false};
+  v.resolved = {backup: {bindings: {forgejo: {repository: 'rest:https://old.example/forgejo/'}}}};
+  const disabled = declaration(v);
+  assert.deepEqual(disabled.backup.requests.forgejo, {enabled: false});
+  assert.equal(disabled.credentials.bindings.forgejo.backupReader, undefined);
+  assert.equal(disabled.credentials.requirements.forgejo.backupWriter, undefined);
+  assert.equal(spec(v).backup, undefined);
+});
 check('external and composed backups preserve controller API and credential roles', () => {
   const v = base(); service(v).backup = {repository: 'rest:https://backup.example/forgejo/', schedule: '0 3 * * *', timeZone: 'Europe/Berlin'};
   assert.deepEqual(spec(v).backup, {repository: 'rest:https://backup.example/forgejo/', readerSecret: 'forgejo-backup-reader', writerSecret: 'forgejo-backup-writer', schedule: '0 3 * * *', timeZone: 'Europe/Berlin'});
