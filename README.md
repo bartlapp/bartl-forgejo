@@ -33,9 +33,9 @@ The exact image build tree remains reachable at `refs/evidence/candidate-05-sour
 
 The qualified placement was one K3s node with independent per-slot volumes and synthetic data. These results establish application reconstruction and planned replacement, not host/provider-loss recovery or production-scale interruption limits. `tests/native.sh` and `tests/native-fixture.mjs` retain the underlying native recipe.
 
-## Obtain and prepare release 0.2.1
+## Obtain and prepare release 0.2.2
 
-The shared-file chart retains the immutable runtime image above. Historical 0.1.0 evidence does not qualify the new preparation procedure; exact 0.2.1 identities and observed qualification belong in its [release record](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.1). The old flat values interface is not accepted. Published chart 0.2.0 failed backup-enabled installation because it emitted an empty schedule rejected by the CRD; 0.2.1 omits the schedule for manual-only backup.
+The shared-file chart retains the immutable runtime image above. Historical 0.1.0 evidence does not qualify the new preparation procedure; exact 0.2.2 identities and observed qualification belong in its [release record](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2). The old flat values interface is not accepted. This release omits disabled backup configuration and empty manual-only schedules, matching the existing CRD.
 
 Use Bash, Helm 4, compatible kubectl, Mike Farah yq v4, jq, OpenSSL, curl and shasum, with shell tracing off. The target needs Linux amd64, enforced NetworkPolicy, Traefik, cert-manager and sufficient state/staging/reconstruction capacity. Compatible external OIDC and HTTPS Restic services suffice; no other Bartl package or company-specific tooling is necessary.
 
@@ -44,11 +44,11 @@ set -euo pipefail
 umask 077
 mkdir bartl-forgejo
 cd bartl-forgejo
-helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.2.1
-printf '%s  bartl-forgejo-0.2.1.tgz\n' \
-  e20c8210174b6f428305b8d78ec54ae55d3455dc3f21add4e21273fa2b71900f |
+helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.2.2
+printf '%s  bartl-forgejo-0.2.2.tgz\n' \
+  16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664 |
   shasum -a 256 --check -
-CHART="$PWD/bartl-forgejo-0.2.1.tgz"
+CHART="$PWD/bartl-forgejo-0.2.2.tgz"
 CTX=$(kubectl config current-context)
 NS=forgejo-blue
 INSTANCE=forgejo
@@ -68,7 +68,7 @@ dns:
   root: example.org
 services:
   forgejo:
-    release: "0.2.1"
+    release: "0.2.2"
     bootstrapSecret: forgejo-bootstrap
 ```
 
@@ -417,7 +417,7 @@ export BARTL_FORGEJO_TARGET_HOST=forgejo-target.lab.example.org
 export BARTL_KEYCLOAK_HOST=keycloak.lab.example.org
 export BARTL_LAB_IPV4=REPLACE_WITH_LAB_PUBLIC_IPV4
 export LAB_QUALIFICATION_DIR=/home/runner/qualification
-export BARTL_FORGEJO_CHART=/srv/retained/forgejo-candidate/bartl-forgejo-0.2.1.tgz
+export BARTL_FORGEJO_CHART=/srv/retained/forgejo-candidate/bartl-forgejo-0.2.2.tgz
 bash tests/setup-lab.sh
 node tests/package-proof.mjs \
   --lab "$LAB_QUALIFICATION_DIR/lab.json" \
@@ -435,7 +435,7 @@ After separate publication authorization and successful exact-candidate qualific
 ```sh
 skopeo copy --preserve-digests oci:/srv/retained/forgejo-candidate/image:candidate \
   docker://ghcr.io/bartlapp/bartl-forgejo-controller:QUALIFIED_PACKAGE_TAG
-helm push /srv/retained/forgejo-candidate/bartl-forgejo-0.2.1.tgz oci://ghcr.io/bartlapp
+helm push /srv/retained/forgejo-candidate/bartl-forgejo-0.2.2.tgz oci://ghcr.io/bartlapp
 ```
 
 Verify the registry digest against `image.digest` and retain the chart checksum, source archive/tree identity and qualification identity with the release. The chart continues to select the digest, never the mutable publication tag. Publishing is not part of `build.sh`.

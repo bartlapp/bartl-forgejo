@@ -20,13 +20,12 @@ spec:
   {{- with $service.bootstrapSecret }}
   bootstrapSecret: {{ . | quote }}
   {{- end }}
+  {{- if $backup.enabled }}
   backup:
-    {{- if $backup.enabled }}
     {{- $native := omit $backup "enabled" "endpoint" }}
     {{- if not $native.schedule }}{{- $_ := unset $native "schedule" }}{{- end }}
     {{- toYaml $native | nindent 4 }}
-    {{- else }} {}
-    {{- end }}
+  {{- end }}
   ingress:
     enabled: {{ $service.ingress.enabled }}
     host: {{ $service.hostname | quote }}

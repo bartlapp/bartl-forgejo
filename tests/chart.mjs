@@ -28,7 +28,7 @@ check('shared file selects only this independent release', () => {
   const app = spec(v);
   assert.deepEqual(app.identity, {installation: 'acme', instance: 'forgejo'});
   assert.equal(app.version, '17.0.1'); assert.equal(app.claim, 'forgejo-state'); assert.equal(app.stagingClaim, 'forgejo-capture');
-  assert.equal(app.ingress.host, 'forgejo.acme.example'); assert.deepEqual(app.backup, {});
+  assert.equal(app.ingress.host, 'forgejo.acme.example');
   assert.equal(docs(v).some(d => d.kind === 'Secret'), false);
   assert.equal(docs(v).find(d => d.kind === 'Deployment').spec.template.spec.containers[0].image, 'ghcr.io/bartlapp/bartl-forgejo-controller@sha256:e6b4eae6d8b832d0465fdfd12efae57f0cce1bb7de61d6b26b6d4ff67db7f929');
 });
@@ -77,7 +77,7 @@ check('external and composed backups preserve controller API and credential role
   assert.deepEqual(spec(v).backup, {repository: 'rest:https://backup.example/forgejo/', readerSecret: 'forgejo-backup-reader', writerSecret: 'forgejo-backup-writer', schedule: '0 3 * * *', timeZone: 'Europe/Berlin'});
   service(v).backup = {endpoint: 'archive'}; v.resolved = {backup: {bindings: {forgejo: {endpoint: 'archive', repository: 'rest:https://archive.example/forgejo/', readerSecret: 'reader', writerSecret: 'writer'}, other: 'ignored'}}};
   const b = spec(v).backup; assert.equal(b.readerSecret, 'reader'); assert.equal(b.writerSecret, 'writer'); assert.equal(b.endpoint, undefined); assert.equal(b.enabled, undefined);
-  service(v).backup.enabled = false; assert.deepEqual(spec(v).backup, {}); assert.equal(declaration(v).credentials.requirements.forgejo.backupReader, undefined);
+  service(v).backup.enabled = false; assert.equal(declaration(v).credentials.requirements.forgejo.backupReader, undefined);
 });
 check('manual-only backup omits the CRD-constrained schedule', () => {
   const v = base(); service(v).backup = {repository: 'rest:https://backup.example/forgejo/'};
@@ -107,7 +107,7 @@ check('native SSH Service exposes only serving pods and advertises explicit Node
   delete service(v).ssh.nodePort; rejects(v); service(v).ssh = {nodePort: 30222}; rejects(v);
 });
 check('exact release consistency and deployment-only Helm release name guard', () => {
-  const v = base(); service(v).release = '0.2.1'; spec(v); declaration(v); configuration(v); rejects(v, {release: 'wrong'});
+  const v = base(); service(v).release = '0.2.2'; spec(v); declaration(v); configuration(v); rejects(v, {release: 'wrong'});
   service(v).release = '0.1.0'; for (const mode of ['deployment', 'connections', 'configuration']) rejects(v, {mode});
 });
 check('strict selected interface rejects legacy inputs invalid types and unknown fields', () => {

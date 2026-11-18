@@ -189,7 +189,7 @@ async function main() {
   }
   if (!address || isIP(address) !== 4) throw new Error('Set BARTL_LAB_IPV4 to the disposable lab public IPv4 address');
   if (!isAbsolute(root)) throw new Error('LAB_QUALIFICATION_DIR must be an absolute remote path');
-  if (!isAbsolute(process.env.BARTL_FORGEJO_CHART || '')) throw new Error('BARTL_FORGEJO_CHART must identify the retained 0.2.1 chart archive by absolute path');
+  if (!isAbsolute(process.env.BARTL_FORGEJO_CHART || '')) throw new Error('BARTL_FORGEJO_CHART must identify the retained 0.2.2 chart archive by absolute path');
   process.umask(0o077);
   // This is a fresh-setup tool, not a destructive reset or reconciliation tool.
   // Existing directory/namespace causes refusal, never deletion or credential rotation.
@@ -223,7 +223,7 @@ async function main() {
     await ksecret(namespace, 'forgejo-backup-reader', roles.reader);
     await ksecret(namespace, 'forgejo-backup-writer', roles.writer);
     const values = { installation: 'forgejo-qualification', instance: 'forgejo', services: { forgejo: {
-      release: '0.2.1', hostname: slotHost, version: '16.0.7', replicas: 1,
+      release: '0.2.2', hostname: slotHost, version: '16.0.7', replicas: 1,
       claims: { state: 'forgejo-state', staging: 'forgejo-capture' }, configurationSecret: 'forgejo-configuration', bootstrapSecret: 'forgejo-bootstrap',
       backup: { repository: backupURL, readerSecret: 'forgejo-backup-reader', writerSecret: 'forgejo-backup-writer' },
       oidc: { issuer: oidc.issuer, name: 'Keycloak' },
