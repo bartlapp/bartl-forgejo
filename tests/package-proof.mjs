@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 // Invoke only on the authorized Hetzner host. All raw evidence stays there.
-// node tests/package-proof.mjs --lab /home/runner/qualification/lab.json \
-//   --chart /srv/retained/candidate/bartl-forgejo-0.1.0.tgz \
+// NODE_EXTRA_CA_CERTS=/home/runner/qualification/proxy.crt node tests/package-proof.mjs --lab /home/runner/qualification/lab.json \
+//   --chart /srv/retained/candidate/bartl-forgejo-0.2.2.tgz \
 //   --artifacts /srv/retained/candidate --work /home/runner/package-proof-01
 // Continuation: add --continue-from /absolute/original-work and optionally
 // --malformed-from /absolute/malformed-work, always with a fresh --work.
@@ -17,7 +17,6 @@ import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
-import http from 'node:http';
 import https from 'node:https';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -98,6 +97,11 @@ async function caseRun(name, fn) {
 async function patch(slot, spec) {
   await kube(slot.namespace, ['patch', 'forgejoapplication', 'forgejo', '--type=merge', '-p', JSON.stringify({ spec })]);
 }
+async function patchSecret(namespace, name, data) {
+  const file = join(work, 'raw', `secret-patch-${++seq}.json`);
+  await privateWrite(file, JSON.stringify({ data }));
+  await kube(namespace, ['patch', 'secret', name, '--type=merge', '--patch-file', file], { sensitive: true });
+}
 async function slotIngress(slot, values) {
   values ||= JSON.parse(await readFile(slot.values, 'utf8'));
   assert.ok(slot.host && slot.url, 'each slot must declare its native host and URL');
@@ -126,7 +130,7 @@ async function install(slot, version, { backup = true, claim, stagingClaim, iden
   const service = { ...values.services[selected], version, replicas: 1,
     ...(claim ? { claims: { state: claim, staging: stagingClaim } } : {}) };
   service.backup = backup
-    ? { ...service.backup, enabled: true, repository: `rest:http://${lab.proxyHost}:${proxy.address().port}${lab.backup.repositoryPath}` }
+    ? { ...service.backup, enabled: true, repository: `rest:https://${lab.proxyHost}:${proxy.address().port}${lab.backup.repositoryPath}` }
     : { enabled: false };
   delete service.backup.endpoint;
   if (service.oidc || service.identityProvider) service.oidc = { ...service.oidc, clientId: service.oidc?.clientId || selected };
@@ -213,7 +217,8 @@ async function startProxy() {
   const upstreamPort = lab.backup.forwardPort || 38443;
   backupForward = await forward(lab.backup.namespace, `service/${lab.backup.service}`, [`${upstreamPort}:${lab.backup.port || 8443}`], lab.backup.kubeconfig);
   const ca = await readFile(lab.backup.ca);
-  proxy = http.createServer(async (req, res) => {
+  assert.ok(lab.proxyTLS?.cert && lab.proxyTLS?.key, 'fault proxy requires retained TLS inputs');
+  proxy = https.createServer({ cert: await readFile(lab.proxyTLS.cert), key: await readFile(lab.proxyTLS.key) }, async (req, res) => {
     const id = `rest-${String(++seq).padStart(6, '0')}`;
     const pathname = new URL(req.url, 'http://fixture.invalid').pathname;
     const selectedData = req.method === 'GET' && /\/(data|snapshots)\/[a-f0-9]+$/.test(pathname);
@@ -359,6 +364,8 @@ async function seed(e) {
   await request(e, '/api/v1/user/keys', { method: 'POST', expected: [201], body: { title: 'package-proof', key: await readFile(join(work, 'client-key.pub'), 'utf8') } });
   await request(e, '/api/v1/user/repos', { method: 'POST', expected: [201], body: { name: 'proof', private: true, default_branch: 'main', auto_init: false } });
   await transports(e, 'source', true);
+  await until('native post-receive repository update', async () =>
+    (await request(e, repoPath(e))).empty === false, 30000);
   await request(e, `${repoPath(e)}/issues`, { method: 'POST', expected: [201], body: { title: 'Preserved issue', body: 'Package recovery fixture' } });
   await request(e, `${repoPath(e)}/issues/1/comments`, { method: 'POST', expected: [201], body: { body: 'Preserved comment' } });
   const form = new FormData(); form.append('attachment', new Blob([fixtureBytes], { type: 'text/plain' }), 'proof.txt');
@@ -455,7 +462,7 @@ async function readOnlyStateDigest(slot, claim) {
 async function recoveryInputDigest(slot) {
   const a = await app(slot), secret = await object(slot.namespace, 'secret', a.spec.backup.readerSecret);
   const decode = key => Buffer.from(secret.data[key], 'base64').toString();
-  const backupEndpoint = { base: `http://127.0.0.1:${proxy.address().port}`, basic: `Basic ${Buffer.from(`${decode('username')}:${decode('restPassword')}`).toString('base64')}` };
+  const backupEndpoint = { base: `https://${lab.proxyHost}:${proxy.address().port}`, basic: `Basic ${Buffer.from(`${decode('username')}:${decode('restPassword')}`).toString('base64')}` };
   const point = await request(backupEndpoint, `${lab.backup.repositoryPath}snapshots/${a.status.backup.snapshot}`, { raw: true });
   return { sourceState: await readOnlyStateDigest(slot, a.spec.claim), snapshot: a.status.backup.snapshot, snapshotSHA256: hash(point),
     configurationSHA256: hash(JSON.stringify((await object(slot.namespace, 'secret', a.spec.configurationSecret)).data)) };
@@ -498,24 +505,26 @@ async function failedTarget(slot, name, mode) {
   return { claims, operation: a.status.operation, fault: mode };
 }
 async function publishedCapture(slot, predecessor, operation) {
-  const jobs = JSON.parse((await kube(slot.namespace, ['get', 'jobs', '-o', 'json'])).text).items;
-  const pods = JSON.parse((await kube(slot.namespace, ['get', 'pods', '-o', 'json'])).text).items;
-  for (const job of jobs) {
-    if (!job.status?.succeeded || !job.metadata.ownerReferences?.some(o => o.controller && o.uid === predecessor.metadata.uid)) continue;
-    for (const pod of pods.filter(p => p.metadata.ownerReferences?.some(o => o.controller && o.uid === job.metadata.uid))) {
-      if (!pod.spec.containers.some(c => c.name === 'forgejo' && c.image === image && invocation(c).includes('publish'))) continue;
-      const terminated = pod.status?.containerStatuses?.find(c => c.name === 'forgejo')?.state?.terminated;
-      if (!terminated || terminated.exitCode !== 0) continue;
-      let result; try { result = JSON.parse(terminated.message); } catch { continue; }
-      if (result.operation !== operation.id || result.command !== 'publish' || !result.success) continue;
-      assert.equal(result.installation, predecessor.spec.identity.installation);
-      assert.equal(result.instance, predecessor.spec.identity.instance);
-      assert.equal(result.version, operation.version);
-      assert.match(result.snapshot, /^[a-f0-9]{64}$/);
-      return { job: job.metadata.name, jobUID: job.metadata.uid, pod: pod.metadata.name, podUID: pod.metadata.uid, result };
+  return until('identity-bound succeeded publication Job', async () => {
+    const jobs = JSON.parse((await kube(slot.namespace, ['get', 'jobs', '-o', 'json'])).text).items;
+    const pods = JSON.parse((await kube(slot.namespace, ['get', 'pods', '-o', 'json'])).text).items;
+    for (const job of jobs) {
+      if (!job.status?.succeeded || !job.metadata.ownerReferences?.some(o => o.controller && o.uid === predecessor.metadata.uid)) continue;
+      for (const pod of pods.filter(p => p.metadata.ownerReferences?.some(o => o.controller && o.uid === job.metadata.uid))) {
+        if (!pod.spec.containers.some(c => c.name === 'forgejo' && c.image === image && invocation(c).includes('publish'))) continue;
+        const terminated = pod.status?.containerStatuses?.find(c => c.name === 'forgejo')?.state?.terminated;
+        if (!terminated || terminated.exitCode !== 0) continue;
+        let result; try { result = JSON.parse(terminated.message); } catch { continue; }
+        if (result.operation !== operation.id || result.command !== 'publish' || !result.success) continue;
+        assert.equal(result.installation, predecessor.spec.identity.installation);
+        assert.equal(result.instance, predecessor.spec.identity.instance);
+        assert.equal(result.version, operation.version);
+        assert.match(result.snapshot, /^[a-f0-9]{64}$/);
+        return { job: job.metadata.name, jobUID: job.metadata.uid, pod: pod.metadata.name, podUID: pod.metadata.uid, result };
+      }
     }
-  }
-  throw new Error('original capture requires a retained succeeded publication Job and identity-bound termination result');
+    return false;
+  }, 60000);
 }
 async function diagnostics() {
   if (!lab?.slots) return;
@@ -575,8 +584,10 @@ async function main() {
       assert.deepEqual(prior.results.slice(0, 14).map(r => r.name), required);
       assert.equal(prior.results[14].name, 'removal-retained-state-reinstall');
       assert.equal(prior.results[14].outcome, 'failed');
-      assert.ok(prior.results[14].reason?.startsWith('publication must preserve the original capture operation'),
-        'only the superseded publication assertion may be continued');
+      const reason = prior.results[14].reason;
+      assert.ok(reason?.startsWith('publication must preserve the original capture operation') ||
+        reason === 'original capture requires a retained succeeded publication Job and identity-bound termination result',
+        'only the superseded publication assertion or Job-observation race may be continued');
     }
     const passed = required.map(name => {
       const matches = prior.results?.filter(result => result.name === name) || [];
@@ -712,7 +723,7 @@ async function main() {
   await caseRun('native-old-source-fixture', async () => { const claims = await freshClaims(blue, 'source'); await install(blue, '16.0.7', claims); const a = await observed(blue, 'Ready'); const e = await endpoint(blue); try { hostKey = await hostIdentity(e); await configureOIDC(e); await seed(e); } finally { await closeChild(e.child); } return { claim: a.spec.claim, hostKey }; });
   await caseRun('existing-restart-backup-inaccessible', async () => {
     const a = await app(blue), reader = await object(blue.namespace, 'secret', a.spec.backup.readerSecret), saved = reader.data;
-    await kube(blue.namespace, ['patch', 'secret', reader.metadata.name, '--type=merge', '-p', JSON.stringify({ data: { restPassword: Buffer.from(randomBytes(24).toString('hex')).toString('base64') } })], { sensitive: true });
+    await patchSecret(blue.namespace, reader.metadata.name, { restPassword: Buffer.from(randomBytes(24).toString('hex')).toString('base64') });
     try {
       const pods = JSON.parse((await kube(blue.namespace, ['get', 'pods', '-o', 'json'])).text).items;
       const serving = pods.find(p => p.spec.containers.some(c => c.image === image && invocation(c).includes('serve'))); assert.ok(serving);
@@ -723,7 +734,7 @@ async function main() {
         return replacement.some(p => p.metadata.uid !== serving.metadata.uid && p.spec.containers.some(c => invocation(c).includes('serve')) && p.status.conditions?.some(c => c.type === 'Ready' && c.status === 'True'));
       });
       await observed(blue, 'Ready'); const e = await endpoint(blue); try { await hostIdentity(e, hostKey); await verify(e, 'restart', '16.0.7'); } finally { await closeChild(e.child); }
-    } finally { await kube(blue.namespace, ['patch', 'secret', reader.metadata.name, '--type=merge', '-p', JSON.stringify({ data: saved })], { sensitive: true }); }
+    } finally { await patchSecret(blue.namespace, reader.metadata.name, saved); }
   });
   let sourceSnapshot;
   await caseRun('capture-and-stop-source', async () => { const a = await backup(blue); sourceSnapshot = a.status.backup.snapshot; await stop(blue); await noWriters(blue); return { snapshot: sourceSnapshot, claim: a.spec.claim }; });
@@ -743,10 +754,10 @@ async function main() {
   });
   await caseRun('publication-failure-resume-retained-capture', async () => {
     const a = await app(green), writer = await object(green.namespace, 'secret', a.spec.backup.writerSecret), saved = writer.data;
-    await kube(green.namespace, ['patch', 'secret', writer.metadata.name, '--type=merge', '-p', JSON.stringify({ data: { restPassword: Buffer.from(randomBytes(24).toString('hex')).toString('base64') } })], { sensitive: true });
+    await patchSecret(green.namespace, writer.metadata.name, { restPassword: Buffer.from(randomBytes(24).toString('hex')).toString('base64') });
     let failed;
     try { failed = await backup(green, { success: false }); await observed(green, 'Ready'); assert.ok(condition(failed, 'BackupFailed')); }
-    finally { await kube(green.namespace, ['patch', 'secret', writer.metadata.name, '--type=merge', '-p', JSON.stringify({ data: saved })], { sensitive: true }); }
+    finally { await patchSecret(green.namespace, writer.metadata.name, saved); }
     const jobsBefore = JSON.parse((await kube(green.namespace, ['get', 'jobs', '-o', 'json'])).text).items.filter(j => j.spec.template.spec.containers.some(c => invocation(c).includes('capture'))).map(j => j.metadata.uid);
     const resumed = await backup(green); assert.equal(resumed.status.backup.operation, failed.status.backup.operation, 'publication retry must retain original capture operation');
     const jobsAfter = JSON.parse((await kube(green.namespace, ['get', 'jobs', '-o', 'json'])).text).items.filter(j => j.spec.template.spec.containers.some(c => invocation(c).includes('capture'))).map(j => j.metadata.uid);

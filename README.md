@@ -221,6 +221,8 @@ Prepare an isolated nonproductive slot without production routing or effects. Se
 
 For planned promotion: arrange the accepted interruption and data-loss boundary; withdraw source ingress and direct SSH access; request and verify the final capture; set source `replicas: 0` and await confirmed `Stopped`. Prevent source restart and direct volume access. Reconstruct the candidate from that final point using a fresh independent target where necessary, check useful behavior and preserved host keys/identity, then apply the intended production endpoint configuration and recheck before activating production HTTP and SSH routing. DNS alone is not fencing. The administrator records the active generation and accepted final-write boundary. If the source cannot be confirmed stopped or isolated, do not promote. If a candidate has accepted writes, never automatically reactivate its predecessor.
 
+When reusing the same hostname, complete the predecessor's CR finalization and Helm uninstall below after its final backup and confirmed stop, before enabling target routing. This retains its claims and supplied Secrets. Stop alone can leave an Ingress pointing at an empty backend and the Helm-owned SSH Service in place; two routes for the same hostname can send requests to the retired slot. Do not treat stopped processes as removal of those routing objects.
+
 ## Stop and removal
 
 Ordinary stop is always allowed, including during pending or failed backup publication. Declare it through the application interface, not the generated Deployment:
@@ -419,6 +421,7 @@ export BARTL_LAB_IPV4=REPLACE_WITH_LAB_PUBLIC_IPV4
 export LAB_QUALIFICATION_DIR=/home/runner/qualification
 export BARTL_FORGEJO_CHART=/srv/retained/forgejo-candidate/bartl-forgejo-0.2.2.tgz
 bash tests/setup-lab.sh
+export NODE_EXTRA_CA_CERTS="$LAB_QUALIFICATION_DIR/proxy.crt"
 node tests/package-proof.mjs \
   --lab "$LAB_QUALIFICATION_DIR/lab.json" \
   --chart "$BARTL_FORGEJO_CHART" \

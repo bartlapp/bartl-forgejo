@@ -207,6 +207,14 @@ async function main() {
   for (const namespace of namespaces) await apply({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: namespace } });
   const roles = await backend();
   const oidc = await keycloak();
+  const proxyTLS = { cert: join(root, 'proxy.crt'), key: join(root, 'proxy.key') };
+  await command('openssl', ['req', '-x509', '-newkey', 'rsa:3072', '-nodes', '-days', '7',
+    '-subj', '/CN=Forgejo qualification fault proxy', '-keyout', proxyTLS.key, '-out', proxyTLS.cert,
+    '-addext', `subjectAltName=IP:${address}`, '-addext', 'basicConstraints=critical,CA:TRUE']);
+  const proxyCA = await readFile(proxyTLS.cert);
+  for (const role of ['reader', 'writer']) {
+    roles[role]['ca.crt'] = Buffer.concat([roles[role]['ca.crt'], Buffer.from('\n'), proxyCA]);
+  }
   const recoveryIdentity = { secret: secret(), internal: secret(), lfs: randomBytes(32).toString('base64url') };
   await file(join(root, 'recovery-identity.json'), JSON.stringify(recoveryIdentity));
   const bootstrap = { username: 'proof-admin', password: `Lab-9!${secret()}`, email: 'proof-admin@example.invalid' };
@@ -236,7 +244,7 @@ async function main() {
     slots[slot] = { namespace, release: 'forgejo', host: slotHost, url: `https://${slotHost}`,
       values: join(dir, 'values.json'), configuration: join(dir, 'app.ini'), sshNodePort: 30222 + index };
   }
-  const result = { root, host, address, proxyHost: address, url: `https://${host}`, slots, bootstrap: join(root, 'bootstrap.json'), oidc,
+  const result = { root, host, address, proxyHost: address, proxyTLS, url: `https://${host}`, slots, bootstrap: join(root, 'bootstrap.json'), oidc,
     backup: { namespace: 'forgejo-backup', service: 'backup-restic', claim: 'repository', repository: 'forgejo', url: backupURL,
       port: 443, repositoryPath: '/forgejo/', tlsServerName: backendHost,
       readerSecret: join(root, 'backup/reader-secret.json'), writerSecret: join(root, 'backup/writer-secret.json'),
