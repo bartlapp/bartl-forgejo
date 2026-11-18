@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, writeFile, readFile, chmod } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { isIP } from 'node:net';
@@ -11,8 +11,8 @@ const host = process.env.BARTL_FORGEJO_HOST;
 const targetHost = process.env.BARTL_FORGEJO_TARGET_HOST;
 const keycloakHost = process.env.BARTL_KEYCLOAK_HOST;
 const address = process.env.BARTL_LAB_IPV4;
-const resticChart = 'oci://ghcr.io/bartlapp/bartl-restic@sha256:78d118df791192bcc8dc08ce7ce13ded3ac01b51c33cd19090c30cb7c2d8f20a';
-const keycloakChart = 'oci://ghcr.io/bartlapp/bartl-keycloak@sha256:05e664e8c561685ba605a5a02ccc6649aafbb7c3bf3a0c808abc91cffae53aa0';
+const resticChart = join(root, 'bartl-restic-0.3.0.tgz');
+const keycloakChart = join(root, 'bartl-keycloak-0.6.1.tgz');
 const namespaces = ['forgejo-blue', 'forgejo-green', 'forgejo-empty', 'forgejo-backup', 'forgejo-keycloak'];
 const backendHost = 'backup-restic.forgejo-backup.svc.cluster.local';
 const backupURL = `rest:https://${backendHost}/forgejo/`;
@@ -41,8 +41,9 @@ async function command(program, args, input = undefined, { allowFailure = false 
 const kubectl = (...args) => command('kubectl', args);
 async function apply(object) { await command('kubectl', ['apply', '-f', '-'], JSON.stringify(object)); }
 async function ksecret(namespace, name, data, type = 'Opaque') {
-  await apply({ apiVersion: 'v1', kind: 'Secret', metadata: { namespace, name }, type,
-    data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Buffer.from(value).toString('base64')])) });
+  await command('kubectl', ['apply', '--server-side', '--field-manager=forgejo-preparation', '-f', '-'],
+    JSON.stringify({ apiVersion: 'v1', kind: 'Secret', metadata: { namespace, name }, type,
+      data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Buffer.from(value).toString('base64')])) }));
 }
 async function pvc(namespace, name, size) {
   await apply({ apiVersion: 'v1', kind: 'PersistentVolumeClaim', metadata: { namespace, name },
@@ -70,25 +71,16 @@ async function dns() {
     }
   }
 }
-async function publicCertificate() {
-  // Stop only this explicitly opted-in disposable K3s lab, before applications exist.
-  // killall removes surviving Traefik hostPort containers which systemctl stop leaves behind.
-  // Always restore K3s, including certbot/killall failure; never edit its service manifests.
-  try {
-    await command('sudo', ['systemctl', 'stop', 'k3s']);
-    await command('sudo', ['/usr/local/bin/k3s-killall.sh']);
-    await command('sudo', ['certbot', 'certonly', '--standalone', '--non-interactive', '--agree-tos',
-      '--register-unsafely-without-email', '--cert-name', host, '-d', host, '-d', targetHost, '-d', keycloakHost,
-      '--keep-until-expiring']);
-  } finally {
-    await command('sudo', ['systemctl', 'start', 'k3s']);
-  }
-  await kubectl('wait', 'nodes', '--all', '--for=condition=Ready', '--timeout=5m');
-  const certificate = await command('sudo', ['cat', `/etc/letsencrypt/live/${host}/fullchain.pem`]);
-  const key = await command('sudo', ['cat', `/etc/letsencrypt/live/${host}/privkey.pem`]);
-  await file(join(root, 'public-tls.crt'), certificate.out);
-  await file(join(root, 'public-tls.key'), key.out);
-  return { 'tls.crt': certificate.out, 'tls.key': key.out };
+async function releasedChart(name, version, checksum) {
+  await command('helm', ['pull', `oci://ghcr.io/bartlapp/${name}`, '--version', version, '--destination', root]);
+  const archive = await readFile(join(root, `${name}-${version}.tgz`));
+  if (createHash('sha256').update(archive).digest('hex') !== checksum) throw new Error(`${name} released archive checksum mismatch`);
+}
+async function declaration(chart, release, namespace, values, mode = 'connections') {
+  const rendered = await command('helm', ['template', release, chart, '-n', namespace,
+    '-f', '-', '--set-string', `renderMode=${mode}`, '--show-only', `templates/${mode}.yaml`], JSON.stringify(values));
+  const decoded = await command('yq', ['-o=json', '.'], rendered.out);
+  return JSON.parse(decoded.out);
 }
 async function backend() {
   const dir = join(root, 'backup');
@@ -118,28 +110,41 @@ async function backend() {
   await ksecret('forgejo-backup', 'forgejo-repository-auth', { htpasswd });
   await ksecret('forgejo-backup', 'repository-key', { password });
   await ksecret('forgejo-backup', 'repository-admin', credentials.admin);
-  const values = { application: { replicas: 1 }, existingClaim: 'repository', tlsSecret: 'repository-tls', repositories: [{ name: 'forgejo', authSecret: 'forgejo-repository-auth', passwordSecret: 'repository-key' }] };
+  const values = { installation: 'forgejo-qualification', instance: 'restic', services: { restic: {
+    release: '0.3.0', hostname: backendHost, replicas: 1, existingClaim: 'repository', tlsSecret: 'repository-tls',
+    tls: { managed: false }, ingress: { enabled: false },
+    repositories: [{ name: 'forgejo', authSecret: 'forgejo-repository-auth', passwordSecret: 'repository-key' }] } } };
   await file(path('values.json'), JSON.stringify(values, null, 2));
   await command('helm', ['upgrade', '--install', 'backup', resticChart, '-n', 'forgejo-backup', '-f', path('values.json'), '--wait=legacy', '--timeout=5m']);
   await ready('forgejo-backup', 'resticapplication/backup-restic');
   return credentials;
 }
-async function keycloak(tls) {
+async function keycloak() {
   const namespace = 'forgejo-keycloak';
   const password = secret();
-  await ksecret(namespace, 'keycloak-tls', tls, 'kubernetes.io/tls');
   await ksecret(namespace, 'keycloak-database', { username: 'keycloak', database: 'keycloak', password: secret() });
   await ksecret(namespace, 'keycloak-database-admin', { username: 'postgres', password: secret() });
   await ksecret(namespace, 'keycloak-bootstrap', { username: 'admin', password });
   await file(join(root, 'keycloak-admin.json'), JSON.stringify({ username: 'admin', password }));
-  const values = { identity: { installation: 'forgejo-qualification', instance: 'keycloak' }, configuration: { hostname: `https://${keycloakHost}` },
+  const values = { installation: 'forgejo-qualification', instance: 'keycloak', services: { keycloak: {
+    release: '0.6.1', hostname: keycloakHost,
     database: { secretName: 'keycloak-database', adminSecretName: 'keycloak-database-admin', size: '5Gi' }, bootstrapAdminSecret: 'keycloak-bootstrap',
-    ingress: { enabled: true, className: 'traefik', tlsSecretName: 'keycloak-tls', controllerNamespace: 'kube-system', administratorSourceRanges: [] } };
+    ingress: { enabled: true, className: 'traefik', tlsSecretName: 'keycloak-tls', controllerNamespace: 'kube-system', administratorSourceRanges: [] } } } };
   await file(join(root, 'keycloak.values.json'), JSON.stringify(values, null, 2));
   await command('helm', ['upgrade', '--install', 'keycloak', keycloakChart, '-n', namespace, '-f', join(root, 'keycloak.values.json'), '--wait=legacy', '--timeout=5m']);
   // Native management API, not a substitute login service. Retry startup only;
   // mutating requests below are not blindly retried after uncertain responses.
-  const base = `https://${keycloakHost}`;
+  const provider = await declaration(keycloakChart, 'keycloak', namespace, values);
+  const base = provider.services.keycloak.endpoints.https.url;
+  const issuer = provider.services.keycloak.oidc.issuer;
+  const consumers = [];
+  for (const hostname of [host, targetHost]) {
+    const choice = { installation: values.installation, instance: 'forgejo',
+      services: { forgejo: { hostname, oidc: { issuer, name: 'Keycloak' } } } };
+    const connection = await declaration(process.env.BARTL_FORGEJO_CHART, 'forgejo', namespace, choice);
+    const configuration = await declaration(process.env.BARTL_FORGEJO_CHART, 'forgejo', namespace, choice, 'configuration');
+    consumers.push({ ...connection.oidc.requests.forgejo, ...configuration.configuration.forgejo.oidc });
+  }
   let token;
   for (let attempt = 0; attempt < 180; attempt++) {
     try {
@@ -150,25 +155,30 @@ async function keycloak(tls) {
     await pause(5000);
   }
   if (!token) throw new Error('Keycloak HTTPS/admin API unavailable; inspect protected inputs and workload status');
-  const realm = 'forgejo-qualification';
+  const realm = issuer.split('/').at(-1);
   const clientSecret = secret();
   const userPassword = `Lab-9!${secret()}`;
   const response = await fetch(`${base}/admin/realms`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ realm, enabled: true, registrationAllowed: false, resetPasswordAllowed: false,
-      clients: [{ clientId: 'forgejo', protocol: 'openid-connect', enabled: true, publicClient: false, secret: clientSecret,
+      clients: [{ clientId: consumers[0].clientId, protocol: 'openid-connect', enabled: true, publicClient: false, secret: clientSecret,
         standardFlowEnabled: true, directAccessGrantsEnabled: false,
-        redirectUris: [host, targetHost].map(name => `https://${name}/user/oauth2/Keycloak/callback`),
-        webOrigins: [host, targetHost].map(name => `https://${name}`) }],
+        redirectUris: consumers.flatMap(consumer => consumer.redirectUris),
+        webOrigins: consumers.flatMap(consumer => consumer.webOrigins) }],
       users: [{ username: 'oidc-proof', enabled: true, email: 'oidc-proof@example.invalid', emailVerified: true, firstName: 'OIDC', lastName: 'Proof',
         credentials: [{ type: 'password', value: userPassword, temporary: false }] }] }), signal: AbortSignal.timeout(30000) });
   if (response.status !== 201) throw new Error(`Disposable Keycloak realm creation returned HTTP ${response.status}`);
-  const oidc = { providerName: 'Keycloak', clientId: 'forgejo', clientSecret, issuer: `${base}/realms/${realm}`,
-    discoveryURL: `${base}/realms/${realm}/.well-known/openid-configuration`, callbackURL: `https://${host}/user/oauth2/Keycloak/callback`, username: 'oidc-proof', password: userPassword };
+  const oidc = { providerName: consumers[0].name, clientId: consumers[0].clientId, clientSecret, issuer,
+    discoveryURL: consumers[0].discoveryUrl, callbackURL: consumers[0].callbackUrl, username: 'oidc-proof', password: userPassword };
   await file(join(root, 'oidc.json'), JSON.stringify(oidc, null, 2));
   return { issuer: oidc.issuer, configuration: join(root, 'oidc.json') };
 }
-function ini(identity, sshPort, host) {
-  return `APP_NAME = Bartl Forgejo qualification\nRUN_USER = git\nRUN_MODE = prod\nWORK_PATH = /data\n[server]\nAPP_DATA_PATH = /data/data\nHTTP_ADDR = 0.0.0.0\nHTTP_PORT = 3000\nDOMAIN = ${host}\nROOT_URL = https://${host}/\nLOCAL_ROOT_URL = http://127.0.0.1:3000/\nOFFLINE_MODE = true\nSTART_SSH_SERVER = true\nSSH_LISTEN_HOST = 0.0.0.0\nSSH_LISTEN_PORT = 2222\nSSH_PORT = ${sshPort}\nSSH_DOMAIN = ${host}\nSSH_USER = git\nBUILTIN_SSH_SERVER_USER = git\nSSH_ROOT_PATH = /data/data/ssh\nSSH_SERVER_HOST_KEYS = ssh/forgejo.ed25519\nLFS_START_SERVER = true\nLFS_JWT_SECRET = ${identity.lfs}\n[database]\nDB_TYPE = sqlite3\nPATH = /data/data/forgejo.db\n[repository]\nROOT = /data/data/repositories\n[security]\nINSTALL_LOCK = true\nDISABLE_WEBHOOKS = true\nSECRET_KEY = ${identity.secret}\nINTERNAL_TOKEN = ${identity.internal}\n[service]\nDISABLE_REGISTRATION = true\nREQUIRE_SIGNIN_VIEW = true\nENABLE_NOTIFY_MAIL = false\n[oauth2_client]\nENABLE_AUTO_REGISTRATION = true\nACCOUNT_LINKING = disabled\n[mailer]\nENABLED = false\n[email.incoming]\nENABLED = false\n[actions]\nENABLED = false\n[mirror]\nENABLED = false\n[federation]\nENABLED = false\n[cron.update_mirrors]\nENABLED = false\n[cron.sync_external_users]\nENABLED = false\n[cron.update_checker]\nENABLED = false\n[webhook]\nALLOWED_HOST_LIST = loopback\n[log]\nMODE = console\nROOT_PATH = /data/log\n`;
+async function nativeConfiguration(namespace, valuesPath, identity) {
+  const rendered = await command('helm', ['template', 'forgejo', process.env.BARTL_FORGEJO_CHART,
+    '-n', namespace, '-f', valuesPath, '--set-string', 'instance=forgejo',
+    '--set-string', 'renderMode=configuration', '--show-only', 'templates/configuration.yaml']);
+  const decoded = await command('yq', ['-o=json', '.configuration.forgejo'], rendered.out);
+  const configuration = JSON.parse(decoded.out);
+  return `${configuration.appIni}\n[security]\nSECRET_KEY = ${identity.secret}\nINTERNAL_TOKEN = ${identity.internal}\n[server]\nLFS_JWT_SECRET = ${identity.lfs}\n[service]\nREQUIRE_SIGNIN_VIEW = true\n`;
 }
 async function main() {
   if (process.platform !== 'linux' || process.env.BARTL_FORGEJO_LAB !== 'hetzner' || process.env.BARTL_FORGEJO_DISPOSABLE_CLUSTER !== 'yes') throw new Error('Explicit disposable Linux Hetzner opt-in required');
@@ -179,6 +189,7 @@ async function main() {
   }
   if (!address || isIP(address) !== 4) throw new Error('Set BARTL_LAB_IPV4 to the disposable lab public IPv4 address');
   if (!isAbsolute(root)) throw new Error('LAB_QUALIFICATION_DIR must be an absolute remote path');
+  if (!isAbsolute(process.env.BARTL_FORGEJO_CHART || '')) throw new Error('BARTL_FORGEJO_CHART must identify the retained 0.2.1 chart archive by absolute path');
   process.umask(0o077);
   // This is a fresh-setup tool, not a destructive reset or reconciliation tool.
   // Existing directory/namespace causes refusal, never deletion or credential rotation.
@@ -190,10 +201,12 @@ async function main() {
     if (result.out.length) throw new Error(`Namespace ${ns} already exists; fresh lab required`);
   }
   await dns();
-  const tls = await publicCertificate();
+  await kubectl('-n', 'cert-manager', 'rollout', 'status', 'deployment/cert-manager', '--timeout=5m');
+  await releasedChart('bartl-restic', '0.3.0', '57feb5b39b325e3972fe9a9c870cd6c0c5fe54f2f91faba8b4b1652fb4918253');
+  await releasedChart('bartl-keycloak', '0.6.1', '7abb55bcefbcde70dc8f29309d508d314a48783547067b529d48617d23c9225a');
   for (const namespace of namespaces) await apply({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: namespace } });
   const roles = await backend();
-  const oidc = await keycloak(tls);
+  const oidc = await keycloak();
   const recoveryIdentity = { secret: secret(), internal: secret(), lfs: randomBytes(32).toString('base64url') };
   await file(join(root, 'recovery-identity.json'), JSON.stringify(recoveryIdentity));
   const bootstrap = { username: 'proof-admin', password: `Lab-9!${secret()}`, email: 'proof-admin@example.invalid' };
@@ -204,20 +217,22 @@ async function main() {
     const dir = join(root, slot);
     await mkdir(dir, { mode: 0o700 });
     const slotHost = slot === 'green' ? targetHost : host;
-    const config = ini(recoveryIdentity, 30222 + index, slotHost);
-    await file(join(dir, 'app.ini'), config);
     await pvc(namespace, 'forgejo-state', '8Gi');
     await pvc(namespace, 'forgejo-capture', '8Gi');
-    await ksecret(namespace, 'forgejo-configuration', { 'app.ini': config });
     await ksecret(namespace, 'forgejo-bootstrap', bootstrap);
     await ksecret(namespace, 'forgejo-backup-reader', roles.reader);
     await ksecret(namespace, 'forgejo-backup-writer', roles.writer);
-    await ksecret(namespace, 'forgejo-tls', tls, 'kubernetes.io/tls');
-    const values = { identity: { installation: 'forgejo-qualification', instance: slot === 'empty' ? 'empty' : 'forgejo' }, version: '16.0.7', replicas: 1,
-      claim: 'forgejo-state', stagingClaim: 'forgejo-capture', configurationSecret: 'forgejo-configuration', bootstrapSecret: 'forgejo-bootstrap',
+    const values = { installation: 'forgejo-qualification', instance: 'forgejo', services: { forgejo: {
+      release: '0.2.1', hostname: slotHost, version: '16.0.7', replicas: 1,
+      claims: { state: 'forgejo-state', staging: 'forgejo-capture' }, configurationSecret: 'forgejo-configuration', bootstrapSecret: 'forgejo-bootstrap',
       backup: { repository: backupURL, readerSecret: 'forgejo-backup-reader', writerSecret: 'forgejo-backup-writer' },
-      ingress: { enabled: slot !== 'empty', host: slotHost, className: 'traefik', tlsSecret: 'forgejo-tls' }, ssh: { port: 2222 } };
+      oidc: { issuer: oidc.issuer, name: 'Keycloak' },
+      ingress: { enabled: slot !== 'empty', className: 'traefik', tlsSecret: 'forgejo-tls' },
+      ssh: { port: 2222, exposure: 'NodePort', nodePort: 30222 + index } } } };
     await file(join(dir, 'values.json'), JSON.stringify(values, null, 2));
+    const config = await nativeConfiguration(namespace, join(dir, 'values.json'), recoveryIdentity);
+    await file(join(dir, 'app.ini'), config);
+    await ksecret(namespace, 'forgejo-configuration', { 'app.ini': config });
     slots[slot] = { namespace, release: 'forgejo', host: slotHost, url: `https://${slotHost}`,
       values: join(dir, 'values.json'), configuration: join(dir, 'app.ini'), sshNodePort: 30222 + index };
   }
@@ -228,6 +243,6 @@ async function main() {
       reader: join(root, 'backup/reader.json'), writer: join(root, 'backup/writer.json'), admin: join(root, 'backup/admin.json'), ca: join(root, 'backup/ca.crt') } };
   await file(join(root, 'lab.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ event: 'lab-prepared', configuration: join(root, 'lab.json'), namespaces,
-    forgejoInstalled: false, note: 'Protected values are ready; install retained digest-pinned chart and configure native OAuth source during qualification. SSH NodePort routing remains qualification-owned.' }));
+    forgejoInstalled: false, note: 'Protected values are ready; install the retained digest-pinned chart and configure the native OAuth source during qualification. The chart owns SSH NodePort exposure.' }));
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

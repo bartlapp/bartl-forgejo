@@ -1,3 +1,5 @@
+{{- if eq .Values.renderMode "deployment" }}
+{{- $service := include "forgejo.service" . | fromYaml }}
 # SPDX-License-Identifier: Apache-2.0
 apiVersion: v1
 kind: ServiceAccount
@@ -84,8 +86,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: controller
-          image: {{ .Values.image | quote }}
-          imagePullPolicy: IfNotPresent
+          image: {{ $service.controller.image | quote }}
+          imagePullPolicy: {{ $service.controller.imagePullPolicy }}
           command: [/usr/local/bin/controller]
           args: ["--metrics-bind-address=0", "--health-probe-bind-address=:8081", "--leader-elect=true"]
           env:
@@ -94,7 +96,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: WORKER_IMAGE
-              value: {{ .Values.image | quote }}
+              value: {{ $service.controller.image | quote }}
           ports:
             - name: health
               containerPort: 8081
@@ -112,10 +114,11 @@ spec:
             capabilities:
               drop: [ALL]
           resources:
-            {{- toYaml .Values.controller.resources | nindent 12 }}
+            {{- toYaml $service.controller.resources | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
           emptyDir: {}
+{{- end }}

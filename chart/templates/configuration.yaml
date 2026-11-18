@@ -1,0 +1,107 @@
+{{- define "forgejo.appIni" -}}
+RUN_USER = git
+RUN_MODE = prod
+WORK_PATH = /data
+[server]
+APP_DATA_PATH = /data/data
+PROTOCOL = http
+HTTP_ADDR = 0.0.0.0
+HTTP_PORT = 3000
+ROOT_URL = https://{{ .hostname }}/
+LOCAL_ROOT_URL = http://127.0.0.1:3000/
+DOMAIN = {{ .hostname }}
+SSH_DOMAIN = {{ .ssh.hostname }}
+SSH_PORT = {{ if eq .ssh.exposure "NodePort" }}{{ .ssh.nodePort }}{{ else }}{{ .ssh.port }}{{ end }}
+START_SSH_SERVER = true
+SSH_LISTEN_HOST = 0.0.0.0
+SSH_LISTEN_PORT = 2222
+SSH_ROOT_PATH = /data/data/ssh
+SSH_SERVER_HOST_KEYS = ssh/forgejo.ed25519
+SSH_USER = git
+BUILTIN_SSH_SERVER_USER = git
+LFS_START_SERVER = true
+OFFLINE_MODE = true
+[database]
+DB_TYPE = sqlite3
+PATH = /data/data/forgejo.db
+[repository]
+ROOT = /data/data/repositories
+DISABLE_MIGRATIONS = true
+[security]
+INSTALL_LOCK = true
+DISABLE_GIT_HOOKS = true
+DISABLE_WEBHOOKS = true
+[service]
+DISABLE_REGISTRATION = true
+ENABLE_NOTIFY_MAIL = false
+[oauth2_client]
+ENABLE_AUTO_REGISTRATION = true
+ACCOUNT_LINKING = disabled
+[mailer]
+ENABLED = false
+[email.incoming]
+ENABLED = false
+[actions]
+ENABLED = false
+[mirror]
+ENABLED = false
+[federation]
+ENABLED = false
+[cron.update_mirrors]
+ENABLED = false
+[cron.sync_external_users]
+ENABLED = false
+[cron.update_checker]
+ENABLED = false
+[webhook]
+ALLOWED_HOST_LIST = loopback
+[log]
+MODE = console
+ROOT_PATH = /data/log
+{{ range $section, $path := dict "attachment" "attachments" "lfs" "lfs" "avatar" "avatars" "repo-avatar" "repo-avatars" "repo-archive" "repo-archive" "packages" "packages" }}
+[{{ $section }}]
+STORAGE_TYPE = local
+PATH = /data/data/{{ $path }}
+{{ end }}
+{{- end -}}
+{{- if eq .Values.renderMode "configuration" }}
+{{- $service := include "forgejo.service" . | fromYaml }}
+{{- $backup := include "forgejo.backup" (dict "root" . "service" $service) | fromYaml }}
+{{- $oidc := include "forgejo.oidc" (dict "root" . "service" $service) | fromYaml }}
+configuration:
+  {{ .Values.instance | quote }}:
+    secretName: {{ $service.configurationSecret | quote }}
+    key: app.ini
+    appIni: |
+      {{- include "forgejo.appIni" $service | nindent 6 }}
+    retainedIdentity:
+      security: [SECRET_KEY, INTERNAL_TOKEN]
+      server: [LFS_JWT_SECRET]
+    {{- if $oidc.enabled }}
+    oidc:
+      name: {{ $oidc.name | quote }}
+      provider: openidConnect
+      clientId: {{ $oidc.clientId | quote }}
+      discoveryUrl: {{ printf "%s/.well-known/openid-configuration" (trimSuffix "/" $oidc.issuer) | quote }}
+      callbackUrl: {{ printf "https://%s/user/oauth2/%s/callback" $service.hostname $oidc.name | quote }}
+      scopes: [openid, profile, email]
+      autoDiscover: true
+      clientSecretRequired: true
+      nativeSetup: forgejo admin auth add-oauth
+      arguments:
+        - --name
+        - {{ $oidc.name | quote }}
+        - --provider
+        - openidConnect
+        - --key
+        - {{ $oidc.clientId | quote }}
+        - --auto-discover-url
+        - {{ printf "%s/.well-known/openid-configuration" (trimSuffix "/" $oidc.issuer) | quote }}
+        - --scopes
+        - openid
+        - --scopes
+        - profile
+        - --scopes
+        - email
+    {{- end }}
+{{- end }}

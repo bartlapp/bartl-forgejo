@@ -1,0 +1,33 @@
+replicas: 1
+version: "17.0.1"
+controller:
+  image: ghcr.io/bartlapp/bartl-forgejo-controller@sha256:e6b4eae6d8b832d0465fdfd12efae57f0cce1bb7de61d6b26b6d4ff67db7f929
+  imagePullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+claims:
+  state: forgejo-state
+  staging: forgejo-capture
+configurationSecret: forgejo-configuration
+bootstrapSecret: ""
+oidc:
+  name: keycloak
+tls:
+  managed: true
+  acmeServer: https://acme-v02.api.letsencrypt.org/directory
+ingress:
+  enabled: true
+  className: traefik
+  tlsSecret: forgejo-tls
+ssh:
+  port: 2222
+  exposure: LoadBalancer
+backup:
+  readerSecret: forgejo-backup-reader
+  writerSecret: forgejo-backup-writer
+  schedule: ""
+  timeZone: UTC

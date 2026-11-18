@@ -105,9 +105,10 @@ async function slotIngress(slot, values) {
   assert.equal(url.protocol, 'https:', 'native slot URL must use verified TLS');
   assert.equal(url.host, slot.host, 'slot ingress host must match its native URL');
   assert.equal(url.pathname, '/', 'native slot URL must use the root path');
-  assert.equal(typeof values.ingress?.enabled, 'boolean', 'slot ingress enabled intent required');
-  assert.equal(values.ingress.host, slot.host, 'slot values must use their native host');
-  return { ...values.ingress, host: slot.host };
+  const service = values.services[slot.instance || 'forgejo'];
+  assert.equal(typeof service.ingress?.enabled, 'boolean', 'slot ingress enabled intent required');
+  assert.equal(service.hostname, slot.host, 'slot values must use their native host');
+  return { ...service.ingress, host: slot.host };
 }
 async function start(slot) {
   await patch(slot, { replicas: 1, ingress: await slotIngress(slot) });
@@ -117,13 +118,25 @@ async function install(slot, version, { backup = true, claim, stagingClaim, iden
   const values = JSON.parse(await readFile(slot.values, 'utf8'));
   identity ||= installationIdentity;
   if (!identity) {
-    const declared = values.identity;
-    assert.ok(declared?.installation && declared?.instance, 'installation values must declare both identity components');
+    const declared = { installation: values.installation, instance: slot.instance || 'forgejo' };
+    assert.ok(declared.installation && declared.instance, 'installation values must declare both identity components');
     identity = { installation: `${declared.installation}-${runID}`, instance: `${declared.instance}-${runID}` };
   }
-  const override = { version, replicas: 1, identity, ingress: await slotIngress(slot, values), ...(claim ? { claim, stagingClaim } : {}) };
-  // Null removes configured backup rather than accidentally inheriting credentials.
-  override.backup = backup ? { repository: `rest:http://${lab.proxyHost}:${proxy.address().port}${lab.backup.repositoryPath}` } : null;
+  const selected = slot.instance || 'forgejo';
+  const service = { ...values.services[selected], version, replicas: 1,
+    ...(claim ? { claims: { state: claim, staging: stagingClaim } } : {}) };
+  service.backup = backup
+    ? { ...service.backup, enabled: true, repository: `rest:http://${lab.proxyHost}:${proxy.address().port}${lab.backup.repositoryPath}` }
+    : { enabled: false };
+  delete service.backup.endpoint;
+  if (service.oidc || service.identityProvider) service.oidc = { ...service.oidc, clientId: service.oidc?.clientId || selected };
+  const override = { installation: identity.installation, instance: identity.instance,
+    services: { [identity.instance]: service } };
+  if (service.identityProvider) {
+    const binding = values.resolved?.oidc?.bindings?.[selected];
+    assert.ok(binding, 'composed proof slot must retain its selected OIDC binding');
+    override.resolved = { oidc: { bindings: { [identity.instance]: { ...binding, clientId: service.oidc.clientId } } } };
+  }
   const file = join(work, `${slot.namespace}-${++seq}-values.json`);
   await privateWrite(file, JSON.stringify(override));
   await command('helm', ['upgrade', '--install', 'forgejo', chart, '--namespace', slot.namespace, '--values', slot.values, '--values', file, '--wait=legacy', '--timeout', '5m']);
@@ -177,9 +190,9 @@ async function remove(slot) {
   assert.deepEqual(await Promise.all(claims.map(async name => (await object(slot.namespace, 'pvc', name)).metadata.uid)), uids);
   return { claims, uids };
 }
-async function forward(ns, resource, mapping) {
+async function forward(ns, resource, mapping, kubeconfig) {
   const id = String(++seq).padStart(6, '0');
-  const child = spawn('kubectl', ['-n', ns, 'port-forward', resource, ...mapping], { cwd: work, env: environment(), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('kubectl', [...(kubeconfig ? ['--kubeconfig', kubeconfig] : []), '-n', ns, 'port-forward', resource, ...mapping], { cwd: work, env: environment(), stdio: ['ignore', 'pipe', 'pipe'] });
   children.add(child);
   let output = ''; const chunks = [];
   child.stdout.on('data', b => { output += b.toString(); chunks.push(b); }); child.stderr.on('data', b => chunks.push(b));
@@ -198,7 +211,7 @@ function setFault(mode) {
 }
 async function startProxy() {
   const upstreamPort = lab.backup.forwardPort || 38443;
-  backupForward = await forward(lab.backup.namespace, `service/${lab.backup.service}`, [`${upstreamPort}:${lab.backup.port || 8443}`]);
+  backupForward = await forward(lab.backup.namespace, `service/${lab.backup.service}`, [`${upstreamPort}:${lab.backup.port || 8443}`], lab.backup.kubeconfig);
   const ca = await readFile(lab.backup.ca);
   proxy = http.createServer(async (req, res) => {
     const id = `rest-${String(++seq).padStart(6, '0')}`;
@@ -634,7 +647,8 @@ async function main() {
       [blue, source, 'same-version-replacement-new-backup'],
       [green, target, 'same-version-blue-to-green-independent-pvc'],
     ]) {
-      const declared = JSON.parse(await readFile(slot.values, 'utf8')).identity;
+      const values = JSON.parse(await readFile(slot.values, 'utf8'));
+      const declared = { installation: values.installation, instance: slot.instance || 'forgejo' };
       assert.deepEqual(a.spec.identity, { installation: `${declared.installation}-${priorSuffix}`,
         instance: `${declared.instance}-${priorSuffix}` }, 'live identity must belong to prior qualification');
       const evidence = continuation.passedEvidence.find(result => result.name === caseName).evidence;
@@ -653,7 +667,8 @@ async function main() {
     const target = await app(green), source = await app(blue);
     const suffix = hash(resolve(args['removal-from'])).slice(0, 8);
     assert.notEqual(runID, suffix, 'removal retry requires a fresh workdir');
-    const declared = JSON.parse(await readFile(green.values, 'utf8')).identity;
+    const values = JSON.parse(await readFile(green.values, 'utf8'));
+    const declared = { installation: values.installation, instance: green.instance || 'forgejo' };
     assert.deepEqual(target.spec.identity, { installation: `${declared.installation}-${suffix}`,
       instance: `${declared.instance}-${suffix}` });
     assert.deepEqual(source.spec.identity, target.spec.identity);
@@ -713,7 +728,7 @@ async function main() {
   let sourceSnapshot;
   await caseRun('capture-and-stop-source', async () => { const a = await backup(blue); sourceSnapshot = a.status.backup.snapshot; await stop(blue); await noWriters(blue); return { snapshot: sourceSnapshot, claim: a.spec.claim }; });
   await caseRun('native-old-to-new-independent-pvc', async () => {
-    const values = JSON.parse(await readFile(green.values, 'utf8'));
+    const values = JSON.parse(await readFile(green.values, 'utf8')).services[green.instance || 'forgejo'];
     assert.ok(values.bootstrapSecret, 'configured green bootstrap Secret must be named');
     await kube(green.namespace, ['delete', 'secret', values.bootstrapSecret, '--ignore-not-found', '--wait=true']);
     const remaining = JSON.parse((await kube(green.namespace, ['get', 'secrets', '--field-selector', `metadata.name=${values.bootstrapSecret}`, '-o', 'json'])).text);

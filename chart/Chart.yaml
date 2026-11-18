@@ -3,6 +3,6 @@ apiVersion: v2
 name: bartl-forgejo
 description: Native SQLite Forgejo with namespace-scoped lifecycle coordination
 type: application
-version: 0.1.0
+version: 0.2.1
 appVersion: "17.0.1"
 kubeVersion: ">=1.30.0-0"

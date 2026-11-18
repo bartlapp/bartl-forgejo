@@ -1,12 +1,8 @@
-{{- if ne .Release.Name "forgejo" }}
-{{- fail "Install release forgejo; choose one logical instance per namespace" }}
-{{- end }}
-{{- if not (regexMatch "^[^ @]+@sha256:[a-f0-9]{64}$" .Values.image) }}
-{{- fail "image must be an immutable repository@sha256 digest; use the built chart or candidate image-values.yaml" }}
-{{- end }}
-{{- if eq .Values.claim .Values.stagingClaim }}
-{{- fail "claim and stagingClaim must be distinct external claims" }}
-{{- end }}
+{{- if eq .Values.renderMode "deployment" }}
+{{- if ne .Release.Name "forgejo" }}{{- fail "Install release forgejo; choose one logical instance per namespace" }}{{- end }}
+{{- $service := include "forgejo.service" . | fromYaml }}
+{{- $oidc := include "forgejo.oidc" (dict "root" . "service" $service) | fromYaml }}
+{{- $backup := include "forgejo.backup" (dict "root" . "service" $service) | fromYaml }}
 apiVersion: forgejo.bartl.sh/v1alpha1
 kind: ForgejoApplication
 metadata:
@@ -14,21 +10,28 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   identity:
-    installation: {{ required "identity.installation is required" .Values.identity.installation | quote }}
-    instance: {{ required "identity.instance is required" .Values.identity.instance | quote }}
-  version: {{ .Values.version | quote }}
-  replicas: {{ .Values.replicas }}
-  claim: {{ required "claim is required" .Values.claim | quote }}
-  stagingClaim: {{ required "stagingClaim is required" .Values.stagingClaim | quote }}
-  configurationSecret: {{ required "configurationSecret is required" .Values.configurationSecret | quote }}
-  {{- with .Values.bootstrapSecret }}
+    installation: {{ .Values.installation | quote }}
+    instance: {{ .Values.instance | quote }}
+  version: {{ $service.version | quote }}
+  replicas: {{ $service.replicas }}
+  claim: {{ $service.claims.state | quote }}
+  stagingClaim: {{ $service.claims.staging | quote }}
+  configurationSecret: {{ $service.configurationSecret | quote }}
+  {{- with $service.bootstrapSecret }}
   bootstrapSecret: {{ . | quote }}
   {{- end }}
-  {{- with .Values.backup }}
   backup:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- if $backup.enabled }}
+    {{- $native := omit $backup "enabled" "endpoint" }}
+    {{- if not $native.schedule }}{{- $_ := unset $native "schedule" }}{{- end }}
+    {{- toYaml $native | nindent 4 }}
+    {{- else }} {}
+    {{- end }}
   ingress:
-    {{- toYaml .Values.ingress | nindent 4 }}
+    enabled: {{ $service.ingress.enabled }}
+    host: {{ $service.hostname | quote }}
+    className: {{ $service.ingress.className | quote }}
+    tlsSecret: {{ $service.ingress.tlsSecret | quote }}
   ssh:
-    port: {{ .Values.ssh.port }}
+    port: {{ $service.ssh.port }}
+{{- end }}

@@ -44,8 +44,8 @@ DIGEST=$(< "$OUT/image.digest")
 export PINNED_IMAGE="$IMAGE_REPOSITORY@$DIGEST"
 printf '%s\n' "$PINNED_IMAGE" > "$OUT/image-reference"
 cp -R "$SNAPSHOT/chart" "$OUT/chart"
-yq -i '.image = strenv(PINNED_IMAGE)' "$OUT/chart/values.yaml"
-yq '{"image": .image}' "$OUT/chart/values.yaml" > "$OUT/image-values.yaml"
+yq -i '.controller.image = strenv(PINNED_IMAGE)' "$OUT/chart/defaults.yaml"
+yq '{"services": {"forgejo": {"controller": {"image": .controller.image}}}}' "$OUT/chart/defaults.yaml" > "$OUT/image-values.yaml"
 helm package "$OUT/chart" --destination "$OUT"
 (cd "$OUT" && sha256sum -- *.tgz source.tar.gz base-revision source-tree source.sha256 package-version image.digest image-reference image-values.yaml > SHA256SUMS)
 printf 'Retained immutable candidate: %s\n' "$OUT"
