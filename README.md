@@ -42,45 +42,76 @@ Use Bash, Helm 4, compatible kubectl, Mike Farah yq v4, jq, OpenSSL, curl and sh
 ```bash
 set -euo pipefail
 umask 077
-mkdir bartl-forgejo
-cd bartl-forgejo
-helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.2.2
-printf '%s  bartl-forgejo-0.2.2.tgz\n' \
-  16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664 |
+INSTALLATION_ID=${INSTALLATION_ID:-acme}
+WORK_DIR=${WORK_DIR:-"$HOME/bartl/$INSTALLATION_ID"}
+case "$WORK_DIR" in /*) ;; *) printf 'Absolute WORK_DIR required\n' >&2; exit 1;; esac
+VALUES=${VALUES:-"$WORK_DIR/installation.yaml"}
+case "$VALUES" in /*) ;; *) printf 'Absolute VALUES required\n' >&2; exit 1;; esac
+DEPLOYMENT=${DEPLOYMENT:-forgejo}
+mkdir -p "$WORK_DIR/packages"
+test -e "$VALUES" || printf 'installation: %s\ndns:\n  root: acme.fke.systems\n' "$INSTALLATION_ID" > "$VALUES"
+CTX=${CTX:-} # For a new external target, supply its reviewed context once.
+DEPLOYMENT="$DEPLOYMENT" CTX="$CTX" yq -i '
+  .deployments[strenv(DEPLOYMENT)] = ({
+    "instance":"forgejo","cluster":"blue","namespace":"forgejo-blue",
+    "release":"forgejo","package":"forgejo"} * (.deployments[strenv(DEPLOYMENT)] // {})) |
+  .packages.forgejo = ({"version":"0.2.2","chart":"oci://ghcr.io/bartlapp/bartl-forgejo",
+    "chartSha256":"16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664"} * (.packages.forgejo // {})) |
+  .services.forgejo = ({"release":"0.2.2","bootstrapSecret":"forgejo-bootstrap"} * (.services.forgejo // {})) |
+  .clusters[.deployments[strenv(DEPLOYMENT)].cluster].kubeconfig.context =
+    (.clusters[.deployments[strenv(DEPLOYMENT)].cluster].kubeconfig.context // strenv(CTX))
+' "$VALUES"
+INSTANCE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
+CLUSTER=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
+NS=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
+RELEASE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
+PACKAGE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
+CTX=$(CLUSTER="$CLUSTER" yq -er '.clusters[strenv(CLUSTER)].kubeconfig.context' "$VALUES")
+test -n "$CTX" || { printf 'Record the selected cluster context before continuing\n' >&2; exit 1; }
+# ACCESS_KUBECONFIG is an explicitly supplied file for ACCESS_CLUSTER only.
+if [ -n "${ACCESS_KUBECONFIG:-}" ] && [ "${ACCESS_CLUSTER:-}" = "$CLUSTER" ]; then
+  export KUBECONFIG="$ACCESS_KUBECONFIG"
+else
+  export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER/base/kubeconfig"
+fi
+kubectl --kubeconfig "$KUBECONFIG" config get-contexts "$CTX" -o name |
+  jq -Rse --arg ctx "$CTX" 'split("\n") | index($ctx) != null' >/dev/null
+VERSION=$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
+CHART_REF=$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].chart' "$VALUES")
+CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
+test -s "$CHART" || helm pull "$CHART_REF" --version "$VERSION" --destination "$WORK_DIR/packages"
+printf '%s  %s\n' "$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")" "$CHART" |
   shasum -a 256 --check -
-CHART="$PWD/bartl-forgejo-0.2.2.tgz"
-CTX=$(kubectl config current-context)
-NS=forgejo-blue
-INSTANCE=forgejo
-INSTALL_DIR="$PWD/installation"
-VALUES="$INSTALL_DIR/installation.yaml"
+INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER/applications/$INSTANCE"
+if [ "$DEPLOYMENT" != "$INSTANCE" ]; then
+  INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"
+fi
 mkdir -p "$INSTALL_DIR/protected/identity" "$INSTALL_DIR/protected/bootstrap"
+HELM_INTENT=()
+for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version hostname:hostname; do
+  key=${mapping%%:*}; field=${mapping#*:}
+  if DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -e '.operations.deployments[strenv(DEPLOYMENT)] | has(strenv(KEY))' "$VALUES" >/dev/null; then
+    value=$(DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -r '.operations.deployments[strenv(DEPLOYMENT)][strenv(KEY)]' "$VALUES")
+    case "$key" in replicas|ingressEnabled) HELM_INTENT+=(--set "services.${INSTANCE//./\\.}.$field=$value") ;;
+      *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
+  fi
+done
 kubectl --context "$CTX" get nodes,storageclass
 kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml |
   kubectl --context "$CTX" apply -f -
 ```
 
-Retain the verified archive, image, complete values and protected inputs independently of the target's failure domain. Create `"$VALUES"` with your stable installation identity and real DNS root:
+Retain the verified archive, image, shared values and protected inputs independently of the target's failure domain. The defaults above are for a new ACME installation only; existing records are authoritative. Set the installation identity, DNS root and required service choices in `"$VALUES"` before continuing. Never replace an existing file with an example.
 
-```yaml
-installation: customer-installation
-dns:
-  root: example.org
-services:
-  forgejo:
-    release: "0.2.2"
-    bootstrapSecret: forgejo-bootstrap
-```
-
-This derives the hostname and selects native 17.0.1 with one replica. `services.<instance>.hostname` overrides derivation; omission restores it. Another logical instance uses its own service key and `--set-string instance=...`; Helm release remains `forgejo`. Keep installation/instance identity across replacement, independently of namespace and package version. Selected service fields are strict; unrelated services and infrastructure are ignored. Use complete reviewed values, not `--reuse-values`.
+The default service derives its hostname and selects native 17.0.1 with one replica. `services.<instance>.hostname` overrides derivation; omission restores it. Another logical instance uses its own service key and `--set-string instance=...`. Deployment identity retains cluster, namespace, Helm release and package selection separately from stable application identity. Keep installation/instance identity across replacement. Selected service fields are strict; unrelated services and infrastructure are ignored. Use complete reviewed values, not `--reuse-values`. Resume by selecting `WORK_DIR` and `DEPLOYMENT` and rerunning the derivation above; no new credentials or installation file are required.
 
 ### Declare storage and connections
 
 Offline declarations use package-owned helpers and work before dependencies exist:
 
 ```bash
-helm template forgejo "$CHART" -n "$NS" -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string renderMode=connections \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=connections \
   --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(INSTANCE="$INSTANCE" yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -170,8 +201,8 @@ BOOTSTRAP_SECRET=$(INSTANCE="$INSTANCE" yq -er '.credentials.bindings[strenv(INS
 kubectl --context "$CTX" -n "$NS" create secret generic "$BOOTSTRAP_SECRET" \
   --from-file="$INSTALL_DIR/protected/bootstrap/" --dry-run=client -o yaml |
   kubectl --context "$CTX" apply -f -
-helm template forgejo "$CHART" -n "$NS" -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string renderMode=configuration \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=configuration \
   --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
 INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" \
@@ -194,8 +225,17 @@ The chart supplies native paths, URLs, ports and disabled-effects settings; no o
 ## Install and observe
 
 ```bash
-helm upgrade --install forgejo "$CHART" --kube-context "$CTX" \
-  -n "$NS" -f "$VALUES" --set-string instance="$INSTANCE"
+HELM_INTENT=()
+for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version hostname:hostname; do
+  key=${mapping%%:*}; field=${mapping#*:}
+  if DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -e '.operations.deployments[strenv(DEPLOYMENT)] | has(strenv(KEY))' "$VALUES" >/dev/null; then
+    value=$(DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -r '.operations.deployments[strenv(DEPLOYMENT)][strenv(KEY)]' "$VALUES")
+    case "$key" in replicas|ingressEnabled) HELM_INTENT+=(--set "services.${INSTANCE//./\\.}.$field=$value") ;;
+      *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
+  fi
+done
+helm upgrade --install "$RELEASE" "$CHART" --kube-context "$CTX" \
+  -n "$NS" -f "$VALUES" --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" "${HELM_INTENT[@]}"
 kubectl --context "$CTX" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=20m
 kubectl --context "$CTX" -n "$NS" get forgejoapplication forgejo -o yaml
 kubectl --context "$CTX" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
@@ -219,7 +259,21 @@ For recovery, provision an independent empty state claim and protected staging c
 
 ## Replacement upgrade and promotion
 
-Prepare an isolated nonproductive slot without production routing or effects. Set its `services.<instance>.hostname` and, where needed, `ssh.hostname`, then rerender declarations and native configuration with the retained identity keys. Validate its endpoint/TLS and restrict validation access; ingress need not be entirely disabled. LFS returns absolute object URLs, so functional checks require the candidate's real native endpoint, not client-side URL rewriting. Select `services.<instance>.version` for the supported 16.0.7 to 17.0.1 forward transition and invoke ordinary installation on independent empty claims. The native procedure restores the captured release, flushes native queue state, then lets the newer native binary perform its supported migration. Downgrades and unsupported transitions must fail rather than initialize over state.
+Retain a new `deployments.<replacement>` entry with the same `instance`, the selected cluster, namespace, release and package. A same-cluster replacement needs a distinct namespace (the chart owns fixed resource names). Nondefault deployment IDs use working files under `applications/$INSTANCE/deployments/$DEPLOYMENT`, keeping original files stationary. Never copy or symlink `installation.yaml`. Select the new `DEPLOYMENT` and rerun the target derivation. Restore protected native identity and supplied credentials from independent custody before creating Secrets. Connection/configuration rendering uses the same recorded target intent as installation.
+
+Keep differing source/candidate settings under `operations.deployments.<deployment>`: `replicas`, `ingressEnabled`, and, only when needed, native `version` and candidate `hostname`. The install block derives these Helm overrides from the record. Use a separate retained `packages` entry if the candidate selects another chart. Never overwrite the source package selection. For example, record source stop before reapplying it:
+
+```bash
+DEPLOYMENT="$DEPLOYMENT" yq -i '
+  .operations.deployments[strenv(DEPLOYMENT)].replicas = 0 |
+  .operations.deployments[strenv(DEPLOYMENT)].ingressEnabled = false
+' "$VALUES"
+```
+
+Run [Stop and removal](#stop-and-removal) for that selected deployment, applying its retained intent and waiting for current-generation `Stopped`, then complete source retirement below before selecting the candidate. Do not use the install block's `Ready` wait for a zero-replica source. Changing shared service defaults must not reactivate it.
+
+
+Prepare an isolated nonproductive slot without production routing or effects. Record its differing hostname/version under the deployment's operating intent above, then rerender declarations and native configuration with retained identity keys and `HELM_INTENT`. Validate endpoint/TLS and restrict validation access; ingress need not be entirely disabled. LFS returns absolute object URLs, so functional checks require the candidate's real native endpoint, not client-side URL rewriting. Select the supported 16.0.7 to 17.0.1 forward transition and invoke ordinary installation on independent empty claims. The native procedure restores the captured release, flushes native queue state, then lets the newer native binary perform its supported migration. Downgrades and unsupported transitions must fail rather than initialize over state.
 
 For planned promotion: arrange the accepted interruption and data-loss boundary; withdraw source ingress and direct SSH access; request and verify the final capture; set source `replicas: 0` and await confirmed `Stopped`. Prevent source restart and direct volume access. Reconstruct the candidate from that final point using a fresh independent target where necessary, check useful behavior and preserved host keys/identity, then apply the intended production endpoint configuration and recheck before activating production HTTP and SSH routing. DNS alone is not fencing. The administrator records the active generation and accepted final-write boundary. If the source cannot be confirmed stopped or isolated, do not promote. If a candidate has accepted writes, never automatically reactivate its predecessor.
 
@@ -230,8 +284,18 @@ When reusing the same hostname, complete the predecessor's CR finalization and H
 Ordinary stop is always allowed, including during pending or failed backup publication. Declare it through the application interface, not the generated Deployment:
 
 ```sh
-helm upgrade forgejo "$CHART" --kube-context "$CTX" -n "$NS" \
-  -f "$VALUES" --set-string instance="$INSTANCE" --set "services.$INSTANCE.replicas=0"
+DEPLOYMENT="$DEPLOYMENT" yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
+HELM_INTENT=()
+for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version hostname:hostname; do
+  key=${mapping%%:*}; field=${mapping#*:}
+  if DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -e '.operations.deployments[strenv(DEPLOYMENT)] | has(strenv(KEY))' "$VALUES" >/dev/null; then
+    value=$(DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -r '.operations.deployments[strenv(DEPLOYMENT)][strenv(KEY)]' "$VALUES")
+    case "$key" in replicas|ingressEnabled) HELM_INTENT+=(--set "services.${INSTANCE//./\\.}.$field=$value") ;;
+      *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
+  fi
+done
+helm upgrade "$RELEASE" "$CHART" --kube-context "$CTX" -n "$NS" \
+  -f "$VALUES" --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" "${HELM_INTENT[@]}"
 kubectl --context "$CTX" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=20m
 ```
 
@@ -241,28 +305,40 @@ Once publication is complete, declare stop as above. Require `status.observedGen
 
 ```sh
 kubectl --context "$CTX" -n "$NS" delete forgejoapplication forgejo --wait=true --timeout=20m
-helm uninstall forgejo --kube-context "$CTX" --namespace "$NS"
+helm uninstall "$RELEASE" --kube-context "$CTX" --namespace "$NS"
 ```
 
 Do not uninstall first or force-remove the finalizer. Claims, supplied Secrets and the cluster-scoped CRD remain. Retain or explicitly dispose of them under the customer's retention decision. Authorized reinstall uses the retained inputs and ordinary install after confirming no predecessor can run. Avoid an intervening Helm upgrade between CR deletion and uninstall, which would recreate intent.
 
 ## Optional composition with Keycloak 0.6.1 and Restic 0.3.0
 
-These remain independent releases, possibly on different clusters. Follow the complete [Keycloak 0.6.1 preparation/install procedure](https://github.com/bartlapp/bartl-keycloak/blob/v0.6.1/README.md) and [qualified Restic 0.3.0 procedure](https://github.com/bartlapp/bartl-restic/blob/75b771ebee3389aad0f2cba4cf44d80830920f0f/README.md), including checksummed chart acquisition, their declared storage/Secrets, current-generation readiness, DNS/TLS, protected credential retention and operating limits. Use their documented instance selectors and the same `"$VALUES"` file; choose provider namespaces/contexts independently. Do not install a provider implicitly by selecting it here.
+These remain independent releases, possibly on different clusters. Follow the complete [Keycloak preparation/install procedure](https://github.com/bartlapp/bartl-keycloak/blob/main/README.md) and [Restic procedure](https://github.com/bartlapp/bartl-restic/blob/main/README.md), including checksummed acquisition of the selected 0.6.1/0.3.0 charts, declared storage/Secrets, current-generation readiness, DNS/TLS, credential retention and operating limits. Their historical release evidence does not qualify changed preparation steps. Use the same `"$VALUES"` file and retained provider deployment mappings; do not install a provider implicitly by selecting it here.
 
 Set `services.<instance>.identityProvider: keycloak` instead of `oidc.issuer`. For backup set `services.<instance>.backup.endpoint: restic` instead of `backup.repository`, and declare the dedicated repository in `services.restic.repositories`. Initialize/admit it through Restic's ordinary Helm upgrade, not manual `restic init`; retain its encryption key and `reader.restPassword`/`writer.restPassword`/`admin.restPassword` separately as its README specifies. Do not pass admin access to Forgejo.
 
-Render the three public declarations with the selected chart archives. `KC_CHART`, `RESTIC_CHART`, `KC_NS` and `RESTIC_NS` below are the verified archives and namespaces from those procedures:
+Render the three public declarations with the selected verified archives. Derive provider placement/package selection from retained deployment IDs rather than retyping target namespaces:
 
 ```bash
-helm template keycloak "$KC_CHART" -n "$KC_NS" -f "$VALUES" \
-  --set-string instance=keycloak --set-string renderMode=connections \
+KC_DEPLOYMENT=${KC_DEPLOYMENT:-keycloak}
+RESTIC_DEPLOYMENT=${RESTIC_DEPLOYMENT:-restic}
+KC_NS=$(DEPLOYMENT="$KC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
+KC_RELEASE=$(DEPLOYMENT="$KC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
+KC_PACKAGE=$(DEPLOYMENT="$KC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
+KC_VERSION=$(PACKAGE="$KC_PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
+KC_CHART="$WORK_DIR/packages/bartl-keycloak-$KC_VERSION.tgz"
+RESTIC_NS=$(DEPLOYMENT="$RESTIC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
+RESTIC_RELEASE=$(DEPLOYMENT="$RESTIC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
+RESTIC_PACKAGE=$(DEPLOYMENT="$RESTIC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
+RESTIC_VERSION=$(PACKAGE="$RESTIC_PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
+RESTIC_CHART="$WORK_DIR/packages/bartl-restic-$RESTIC_VERSION.tgz"
+helm template "$KC_RELEASE" "$KC_CHART" -n "$KC_NS" -f "$VALUES" \
+  --set-string instance=keycloak --set-string services.keycloak.release="$KC_VERSION" --set-string renderMode=connections \
   --show-only templates/connections.yaml > "$INSTALL_DIR/keycloak-connections.yaml"
-helm template backup "$RESTIC_CHART" -n "$RESTIC_NS" -f "$VALUES" \
-  --set-string instance=restic --set-string renderMode=connections \
+helm template "$RESTIC_RELEASE" "$RESTIC_CHART" -n "$RESTIC_NS" -f "$VALUES" \
+  --set-string instance=restic --set-string services.restic.release="$RESTIC_VERSION" --set-string renderMode=connections \
   --show-only templates/connections.yaml > "$INSTALL_DIR/restic-connections.yaml"
-helm template forgejo "$CHART" -n "$NS" -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string renderMode=connections \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=connections \
   --show-only templates/connections.yaml > "$CONNECTIONS"
 OIDC_ISSUER=$(yq -er '.services.keycloak.oidc.issuer' "$INSTALL_DIR/keycloak-connections.yaml")
 OIDC_CLIENT_ID=$(INSTANCE="$INSTANCE" yq -er '.oidc.requests[strenv(INSTANCE)].clientId' "$CONNECTIONS")
