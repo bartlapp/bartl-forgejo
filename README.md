@@ -41,54 +41,56 @@ Use Bash, Helm 4, compatible kubectl, Mike Farah yq v4, jq, OpenSSL, curl and sh
 
 Use the complete version-1 resource graph retained by [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md). For an external target, obtain its authoritative resource description and selected kubeconfig context from its administrator and retain them in `VALUES` before selecting a deployment. Under the [resource contract](https://github.com/bartlapp/bartl-app/blob/main/docs/how-to-bartlize.md#versioned-resource-contract), self-managed K3s requires its node VM entries and their provider bindings; provider-managed EKS requires its provider binding and configuration. Record actual management, ownership, scope and protected credential references, not guessed values or a context-only cluster. These are the schema's current cluster profiles; other implementations need a supported resource description before this recipe applies. Forgejo does not provision infrastructure. An unversioned existing record needs coordinated resource/consumer migration, not just a version field.
 
+`CUSTOMER_ID` identifies the customer (for example `acme`); `INSTALLATION_ID` identifies its operational unit and defaults to the customer ID. Separate installations follow access and credential boundaries, not cluster count. `BASE_DOMAIN` supplies `dns.root` for new records (for example `acme.fke.systems`). `CLUSTER_ID` selects a stable `clusters` key such as `cluster-1`; `KUBE_CONTEXT` is read from that cluster's retained `kubeconfig.context`, not the terminal's current context.
+
 ```bash
 set -euo pipefail
 umask 077
-CUSTOMER=${CUSTOMER:-acme}
-INSTALLATION_ID=${INSTALLATION_ID:-$CUSTOMER}
+CUSTOMER_ID=${CUSTOMER_ID:-acme}
+INSTALLATION_ID=${INSTALLATION_ID:-$CUSTOMER_ID}
 WORK_DIR_ROOT=${WORK_DIR_ROOT:-"$HOME/bartl"}
-WORK_DIR=${WORK_DIR:-"$WORK_DIR_ROOT/$CUSTOMER/${INSTALLATION_ID}-installation"}
+WORK_DIR=${WORK_DIR:-"$WORK_DIR_ROOT/$CUSTOMER_ID/${INSTALLATION_ID}-installation"}
 case "$WORK_DIR" in /*) ;; *) printf 'Absolute WORK_DIR required\n' >&2; exit 1;; esac
 VALUES="$WORK_DIR/installation.yaml"
 case "$VALUES" in /*) ;; *) printf 'Absolute VALUES required\n' >&2; exit 1;; esac
 DEPLOYMENT=${DEPLOYMENT:-forgejo}
 mkdir -p "$WORK_DIR/packages"
 if [ ! -e "$VALUES" ]; then
-  CUSTOMER="$CUSTOMER" INSTALLATION_ID="$INSTALLATION_ID" DNS_ROOT="${DNS_ROOT:-acme.fke.systems}" \
-    yq -n '.schemaVersion = 1 | .customer = strenv(CUSTOMER) | .installation = strenv(INSTALLATION_ID) | .dns.root = strenv(DNS_ROOT)' > "$VALUES"
+  CUSTOMER_ID="$CUSTOMER_ID" INSTALLATION_ID="$INSTALLATION_ID" BASE_DOMAIN="${BASE_DOMAIN:-acme.fke.systems}" \
+    yq -n '.schemaVersion = 1 | .customer = strenv(CUSTOMER_ID) | .installation = strenv(INSTALLATION_ID) | .dns.root = strenv(BASE_DOMAIN)' > "$VALUES"
 fi
 yq -e '.schemaVersion == 1 and (.customer != null) and (.installation != null)' "$VALUES" >/dev/null
-CLUSTER=${CLUSTER:-cluster-1}
-DEPLOYMENT="$DEPLOYMENT" CLUSTER="$CLUSTER" yq -i '
+CLUSTER_ID=${CLUSTER_ID:-cluster-1}
+DEPLOYMENT="$DEPLOYMENT" CLUSTER_ID="$CLUSTER_ID" yq -i '
   .deployments[strenv(DEPLOYMENT)] = ({
-    "instance":"forgejo","cluster":strenv(CLUSTER),"namespace":"forgejo-blue",
+    "instance":"forgejo","cluster":strenv(CLUSTER_ID),"namespace":"forgejo-blue",
     "release":"forgejo","package":"forgejo"} * (.deployments[strenv(DEPLOYMENT)] // {})) |
   .packages[.deployments[strenv(DEPLOYMENT)].package] = ({"version":"0.2.2","chart":"oci://ghcr.io/bartlapp/bartl-forgejo",
     "chartSha256":"16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664"} * (.packages[.deployments[strenv(DEPLOYMENT)].package] // {})) |
   .services[.deployments[strenv(DEPLOYMENT)].instance] = ({"release":"0.2.2","bootstrapSecret":"forgejo-bootstrap"} * (.services[.deployments[strenv(DEPLOYMENT)].instance] // {}))
 ' "$VALUES"
 INSTANCE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
-CLUSTER=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
+CLUSTER_ID=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
 NS=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
 RELEASE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
 PACKAGE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-CTX=$(CLUSTER="$CLUSTER" yq -er '.clusters[strenv(CLUSTER)].kubeconfig.context' "$VALUES")
-test -n "$CTX" || { printf 'Record the selected cluster context before continuing\n' >&2; exit 1; }
+KUBE_CONTEXT=$(CLUSTER_ID="$CLUSTER_ID" yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
+test -n "$KUBE_CONTEXT" || { printf 'Record the selected cluster context before continuing\n' >&2; exit 1; }
 # ACCESS_KUBECONFIG is an explicitly supplied file for ACCESS_CLUSTER only.
-if [ -n "${ACCESS_KUBECONFIG:-}" ] && [ "${ACCESS_CLUSTER:-}" = "$CLUSTER" ]; then
+if [ -n "${ACCESS_KUBECONFIG:-}" ] && [ "${ACCESS_CLUSTER:-}" = "$CLUSTER_ID" ]; then
   export KUBECONFIG="$ACCESS_KUBECONFIG"
 else
-  export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER/base/kubeconfig"
+  export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
 fi
-kubectl --kubeconfig "$KUBECONFIG" config get-contexts "$CTX" -o name |
-  jq -Rse --arg ctx "$CTX" 'split("\n") | index($ctx) != null' >/dev/null
+kubectl --kubeconfig "$KUBECONFIG" config get-contexts "$KUBE_CONTEXT" -o name |
+  jq -Rse --arg ctx "$KUBE_CONTEXT" 'split("\n") | index($ctx) != null' >/dev/null
 VERSION=$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
 CHART_REF=$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].chart' "$VALUES")
 CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
 test -s "$CHART" || helm pull "$CHART_REF" --version "$VERSION" --destination "$WORK_DIR/packages"
 printf '%s  %s\n' "$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")" "$CHART" |
   shasum -a 256 --check -
-INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER/applications/$INSTANCE"
+INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
 if [ "$DEPLOYMENT" != "$INSTANCE" ]; then
   INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"
 fi
@@ -102,9 +104,9 @@ for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version 
       *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
   fi
 done
-kubectl --context "$CTX" get nodes,storageclass
-kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml |
-  kubectl --context "$CTX" apply -f -
+kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
+kubectl --context "$KUBE_CONTEXT" create namespace "$NS" --dry-run=client -o yaml |
+  kubectl --context "$KUBE_CONTEXT" apply -f -
 ```
 
 Retain the verified archive, image, shared values and protected inputs independently of the target's failure domain. The defaults above are for a new ACME installation only; existing records are authoritative. Set the installation identity, DNS root and required service choices in `"$VALUES"` before continuing. Never replace an existing file with an example.
@@ -134,7 +136,7 @@ Create two distinct operator-owned filesystem PVCs, writable by UID/GID 1000 wit
 for role in state staging; do
   CLAIM=$(INSTANCE="$INSTANCE" ROLE="$role" yq -er \
     '.storage.claims[strenv(INSTANCE)][strenv(ROLE)].claimName' "$CONNECTIONS")
-  kubectl --context "$CTX" -n "$NS" apply -f - <<EOF
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" apply -f - <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -159,9 +161,9 @@ For externally managed TLS set `services.<instance>.tls.managed: false`, rerende
 ```bash
 TLS_SECRET=$(INSTANCE="$INSTANCE" yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
 # External TLS mode only:
-# kubectl --context "$CTX" -n "$NS" create secret tls "$TLS_SECRET" \
+# kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret tls "$TLS_SECRET" \
 #   --cert=/protected/tls/fullchain.pem --key=/protected/tls/key.pem \
-#   --dry-run=client -o yaml | kubectl --context "$CTX" apply -f -
+#   --dry-run=client -o yaml | kubectl --context "$KUBE_CONTEXT" apply -f -
 ```
 
 Do not silently adopt existing manually managed certificates. An HTTP Ingress does not expose SSH: the chart creates native TCP Service `forgejo-ssh`, default type LoadBalancer on port 2222. The target must provide that LoadBalancer and firewall reachability. K3s ServiceLB requires the port available on the node. Point the declared SSH hostname to that reachable address; use `ssh.hostname` if it differs from HTTP. Alternatively set `ssh.exposure: NodePort` and explicit `ssh.nodePort`, expose it on the node firewall and route DNS there; the generated native configuration advertises that node port. `ClusterIP` requires an independently supplied TCP route to the declared Service/port. Inspect `kubectl -n "$NS" get service forgejo-ssh -o wide`, test actual SSH clone/push and retain its host-key fingerprint before activation.
@@ -179,9 +181,9 @@ for role in reader writer; do
   case "$role" in reader) BINDING=backupReader ;; writer) BINDING=backupWriter ;; esac
   SECRET=$(INSTANCE="$INSTANCE" BINDING="$BINDING" yq -er \
     '.credentials.bindings[strenv(INSTANCE)][strenv(BINDING)].secretName' "$CONNECTIONS")
-  kubectl --context "$CTX" -n "$NS" create secret generic "$SECRET" \
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$SECRET" \
     --from-file="$INSTALL_DIR/protected/backup/$role/" --dry-run=client -o yaml |
-    kubectl --context "$CTX" apply --server-side --field-manager=forgejo-preparation -f -
+    kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
 done
 ```
 
@@ -204,9 +206,9 @@ Place chosen `username`, `email` and a strong retained `password` in `protected/
 
 ```bash
 BOOTSTRAP_SECRET=$(INSTANCE="$INSTANCE" yq -er '.credentials.bindings[strenv(INSTANCE)].bootstrap.secretName' "$CONNECTIONS")
-kubectl --context "$CTX" -n "$NS" create secret generic "$BOOTSTRAP_SECRET" \
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$BOOTSTRAP_SECRET" \
   --from-file="$INSTALL_DIR/protected/bootstrap/" --dry-run=client -o yaml |
-  kubectl --context "$CTX" apply -f -
+  kubectl --context "$KUBE_CONTEXT" apply -f -
 helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
   --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=configuration \
   --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
@@ -221,9 +223,9 @@ INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGUR
     "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
 } >> "$INSTALL_DIR/protected/app.ini"
 CONFIG_SECRET=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
-kubectl --context "$CTX" -n "$NS" create secret generic "$CONFIG_SECRET" \
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
   --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
-  kubectl --context "$CTX" apply -f -
+  kubectl --context "$KUBE_CONTEXT" apply -f -
 ```
 
 The chart supplies native paths, URLs, ports and disabled-effects settings; no operator-authored `app.ini` machinery is needed. Configuration rendering is offline and nonsecret; selected composed bindings must already match. Regeneration starts from the template and appends retained keys, never accumulates old settings. Keep additional external secret references independently. Capture contains native state and identity/version/inventory/checksum metadata; release, target configuration, TLS, bootstrap and backup credentials remain separate recovery inputs. Restic cache is disposable.
@@ -240,11 +242,11 @@ for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version 
       *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
   fi
 done
-helm upgrade --install "$RELEASE" "$CHART" --kube-context "$CTX" \
+helm upgrade --install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" \
   -n "$NS" -f "$VALUES" --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" "${HELM_INTENT[@]}"
-kubectl --context "$CTX" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=20m
-kubectl --context "$CTX" -n "$NS" get forgejoapplication forgejo -o yaml
-kubectl --context "$CTX" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=20m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication forgejo -o yaml
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
 ```
 
 Skip Certificate waiting only for external TLS. Check HTTPS and actual TCP SSH access. Do not scale generated Deployments or run another writer.
@@ -254,9 +256,9 @@ Before accepting a Ready, Stopped or failure condition, require both `status.obs
 ## Capture and recovery
 
 ```sh
-kubectl --context "$CTX" -n "$NS" annotate forgejoapplication forgejo \
+kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication forgejo \
   forgejo.bartl.sh/backup-request="$(date -u +%Y%m%dT%H%M%SZ)" --overwrite
-kubectl --context "$CTX" -n "$NS" get forgejoapplication forgejo -o yaml
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication forgejo -o yaml
 ```
 
 Wait for the requested value in `status.backup.request`, `success: true` and its snapshot identity. The controller drains writers, captures into the protected staging claim, resumes when current intent and capture safety permit, and publishes using Restic. Publication failure sets `BackupFailed` and retains the capture; it is separate from service health. The retained capture belongs to its original staging claim. Before replacement, finish publication with the original state claim, staging claim and version inputs; after failure, submit a unique backup request to retry. Pending publication rejects changes to those inputs without disrupting the healthy service. Do not delete the retained staging data or issue competing filesystem work. Failed capture or ambiguous state does not authorize restart. Inspect the result rather than assuming an annotation succeeded. The optional native Kubernetes CronJob submits this same interface; independent monitoring must detect absent, stale or failed backups.
@@ -300,9 +302,9 @@ for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version 
       *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
   fi
 done
-helm upgrade "$RELEASE" "$CHART" --kube-context "$CTX" -n "$NS" \
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" \
   -f "$VALUES" --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" "${HELM_INTENT[@]}"
-kubectl --context "$CTX" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=20m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=20m
 ```
 
 Stop and uninstall are different operations. For planned uninstall, first finish any pending publication while retaining the controller, application CR, original state and staging claims, and version inputs. After publication failure, submit a new unique `forgejo.bartl.sh/backup-request` through the capture interface above. Wait until `status.backup.request` matches that request, `status.backup.success` is `true`, and a snapshot identity is recorded. Failed or unavailable backup publication postpones planned uninstall; it does not prevent ordinary stop. Do not rely on automatic recovery of pending publication across uninstall.
@@ -310,8 +312,8 @@ Stop and uninstall are different operations. For planned uninstall, first finish
 Once publication is complete, declare stop as above. Require `status.observedGeneration` and the `Stopped` condition's `observedGeneration` to equal the current `metadata.generation`, with the condition `True`; the wait command alone is insufficient. Then delete the application CR while leaving the controller running until its finalizer has drained workloads and jobs, and only afterwards uninstall Helm:
 
 ```sh
-kubectl --context "$CTX" -n "$NS" delete forgejoapplication forgejo --wait=true --timeout=20m
-helm uninstall "$RELEASE" --kube-context "$CTX" --namespace "$NS"
+kubectl --context "$KUBE_CONTEXT" -n "$NS" delete forgejoapplication forgejo --wait=true --timeout=20m
+helm uninstall "$RELEASE" --kube-context "$KUBE_CONTEXT" --namespace "$NS"
 ```
 
 Do not uninstall first or force-remove the finalizer. Claims, supplied Secrets and the cluster-scoped CRD remain. Retain or explicitly dispose of them under the customer's retention decision. Authorized reinstall uses the retained inputs and ordinary install after confirming no predecessor can run. Avoid an intervening Helm upgrade between CR deletion and uninstall, which would recreate intent.
@@ -437,8 +439,8 @@ After bindings are prepared, rerun configuration rendering/Secret preparation ab
   NAME=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].oidc.name' "$CONFIGURATION")
   CLIENT=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].oidc.clientId' "$CONFIGURATION")
   DISCOVERY=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].oidc.discoveryUrl' "$CONFIGURATION")
-  VERSION=$(kubectl --context "$CTX" -n "$NS" get forgejoapplication forgejo -o jsonpath='{.spec.version}')
-  POD=$(kubectl --context "$CTX" -n "$NS" get pods \
+  VERSION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication forgejo -o jsonpath='{.spec.version}')
+  POD=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods \
     -l app.kubernetes.io/name=forgejo,forgejo.bartl.sh/role=app -o json |
     jq -er '[.items[] | select(.status.phase == "Running")] | if length == 1 then .[0].metadata.name else error("Expected one serving pod") end')
   # Shell-quote every argument; the secret travels only over protected stdin.
@@ -469,7 +471,7 @@ else
   exit 1
 fi
 SCRIPT
-  } | kubectl --context "$CTX" -n "$NS" exec -i "$POD" -c forgejo -- /bin/sh -s
+  } | kubectl --context "$KUBE_CONTEXT" -n "$NS" exec -i "$POD" -c forgejo -- /bin/sh -s
 )
 ```
 
