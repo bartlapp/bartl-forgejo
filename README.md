@@ -44,8 +44,8 @@ Use the complete version-1 resource graph retained by [Base](https://github.com/
 ```bash
 set -euo pipefail
 umask 077
-INSTALLATION_ID=${INSTALLATION_ID:-acme}
 CUSTOMER=${CUSTOMER:-acme}
+INSTALLATION_ID=${INSTALLATION_ID:-$CUSTOMER}
 WORK_DIR=${WORK_DIR:-"$HOME/bartl/$INSTALLATION_ID"}
 case "$WORK_DIR" in /*) ;; *) printf 'Absolute WORK_DIR required\n' >&2; exit 1;; esac
 VALUES=${VALUES:-"$WORK_DIR/installation.yaml"}
