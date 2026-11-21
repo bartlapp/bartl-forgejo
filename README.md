@@ -57,7 +57,7 @@ if [ ! -e "$VALUES" ]; then
     yq -n '.schemaVersion = 1 | .customer = strenv(CUSTOMER) | .installation = strenv(INSTALLATION_ID) | .dns.root = strenv(DNS_ROOT)' > "$VALUES"
 fi
 yq -e '.schemaVersion == 1 and (.customer != null) and (.installation != null)' "$VALUES" >/dev/null
-CLUSTER=${CLUSTER:-blue}
+CLUSTER=${CLUSTER:-cluster-1}
 DEPLOYMENT="$DEPLOYMENT" CLUSTER="$CLUSTER" yq -i '
   .deployments[strenv(DEPLOYMENT)] = ({
     "instance":"forgejo","cluster":strenv(CLUSTER),"namespace":"forgejo-blue",
