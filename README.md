@@ -46,9 +46,10 @@ set -euo pipefail
 umask 077
 CUSTOMER=${CUSTOMER:-acme}
 INSTALLATION_ID=${INSTALLATION_ID:-$CUSTOMER}
-WORK_DIR=${WORK_DIR:-"$HOME/bartl/$INSTALLATION_ID"}
+WORK_DIR_ROOT=${WORK_DIR_ROOT:-"$HOME/bartl"}
+WORK_DIR=${WORK_DIR:-"$WORK_DIR_ROOT/$CUSTOMER/${INSTALLATION_ID}-installation"}
 case "$WORK_DIR" in /*) ;; *) printf 'Absolute WORK_DIR required\n' >&2; exit 1;; esac
-VALUES=${VALUES:-"$WORK_DIR/installation.yaml"}
+VALUES="$WORK_DIR/installation.yaml"
 case "$VALUES" in /*) ;; *) printf 'Absolute VALUES required\n' >&2; exit 1;; esac
 DEPLOYMENT=${DEPLOYMENT:-forgejo}
 mkdir -p "$WORK_DIR/packages"
