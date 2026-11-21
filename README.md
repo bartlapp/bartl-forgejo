@@ -39,27 +39,32 @@ The shared-file chart retains the immutable runtime image above. Historical 0.1.
 
 Use Bash, Helm 4, compatible kubectl, Mike Farah yq v4, jq, OpenSSL, curl and shasum, with shell tracing off. The target needs Linux amd64, enforced NetworkPolicy, Traefik, cert-manager and sufficient state/staging/reconstruction capacity. Compatible external OIDC and HTTPS Restic services suffice; no other Bartl package or company-specific tooling is necessary.
 
+Use the complete version-1 resource graph retained by [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md). For an external target, obtain its authoritative resource description and selected kubeconfig context from its administrator and retain them in `VALUES` before selecting a deployment. Under the [resource contract](https://github.com/bartlapp/bartl-app/blob/main/docs/how-to-bartlize.md#versioned-resource-contract), self-managed K3s requires its node VM entries and their provider bindings; provider-managed EKS requires its provider binding and configuration. Record actual management, ownership, scope and protected credential references, not guessed values or a context-only cluster. These are the schema's current cluster profiles; other implementations need a supported resource description before this recipe applies. Forgejo does not provision infrastructure. An unversioned existing record needs coordinated resource/consumer migration, not just a version field.
+
 ```bash
 set -euo pipefail
 umask 077
 INSTALLATION_ID=${INSTALLATION_ID:-acme}
+CUSTOMER=${CUSTOMER:-acme}
 WORK_DIR=${WORK_DIR:-"$HOME/bartl/$INSTALLATION_ID"}
 case "$WORK_DIR" in /*) ;; *) printf 'Absolute WORK_DIR required\n' >&2; exit 1;; esac
 VALUES=${VALUES:-"$WORK_DIR/installation.yaml"}
 case "$VALUES" in /*) ;; *) printf 'Absolute VALUES required\n' >&2; exit 1;; esac
 DEPLOYMENT=${DEPLOYMENT:-forgejo}
 mkdir -p "$WORK_DIR/packages"
-test -e "$VALUES" || printf 'installation: %s\ndns:\n  root: acme.fke.systems\n' "$INSTALLATION_ID" > "$VALUES"
-CTX=${CTX:-} # For a new external target, supply its reviewed context once.
-DEPLOYMENT="$DEPLOYMENT" CTX="$CTX" yq -i '
+if [ ! -e "$VALUES" ]; then
+  CUSTOMER="$CUSTOMER" INSTALLATION_ID="$INSTALLATION_ID" DNS_ROOT="${DNS_ROOT:-acme.fke.systems}" \
+    yq -n '.schemaVersion = 1 | .customer = strenv(CUSTOMER) | .installation = strenv(INSTALLATION_ID) | .dns.root = strenv(DNS_ROOT)' > "$VALUES"
+fi
+yq -e '.schemaVersion == 1 and (.customer != null) and (.installation != null)' "$VALUES" >/dev/null
+CLUSTER=${CLUSTER:-blue}
+DEPLOYMENT="$DEPLOYMENT" CLUSTER="$CLUSTER" yq -i '
   .deployments[strenv(DEPLOYMENT)] = ({
-    "instance":"forgejo","cluster":"blue","namespace":"forgejo-blue",
+    "instance":"forgejo","cluster":strenv(CLUSTER),"namespace":"forgejo-blue",
     "release":"forgejo","package":"forgejo"} * (.deployments[strenv(DEPLOYMENT)] // {})) |
-  .packages.forgejo = ({"version":"0.2.2","chart":"oci://ghcr.io/bartlapp/bartl-forgejo",
-    "chartSha256":"16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664"} * (.packages.forgejo // {})) |
-  .services.forgejo = ({"release":"0.2.2","bootstrapSecret":"forgejo-bootstrap"} * (.services.forgejo // {})) |
-  .clusters[.deployments[strenv(DEPLOYMENT)].cluster].kubeconfig.context =
-    (.clusters[.deployments[strenv(DEPLOYMENT)].cluster].kubeconfig.context // strenv(CTX))
+  .packages[.deployments[strenv(DEPLOYMENT)].package] = ({"version":"0.2.2","chart":"oci://ghcr.io/bartlapp/bartl-forgejo",
+    "chartSha256":"16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664"} * (.packages[.deployments[strenv(DEPLOYMENT)].package] // {})) |
+  .services[.deployments[strenv(DEPLOYMENT)].instance] = ({"release":"0.2.2","bootstrapSecret":"forgejo-bootstrap"} * (.services[.deployments[strenv(DEPLOYMENT)].instance] // {}))
 ' "$VALUES"
 INSTANCE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
 CLUSTER=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
