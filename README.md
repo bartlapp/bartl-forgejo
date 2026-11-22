@@ -1,142 +1,103 @@
-# bartl-forgejo
+# Bartlized Forgejo
 
-A Helm operating package for native Forgejo, SQLite and filesystem storage. One namespace-scoped application controller coordinates native startup, planned stopped capture and Restic publication. The administrator chooses the target slot, release and production promotion. There is no custom database migration, schema engine or automatic failover.
+Native Forgejo with SQLite/filesystem state, HTTPS/SSH access, stopped capture and Restic publication. One application controller coordinates native work; the administrator selects target, release and promotion.
 
-## Supported profile and evidence
+New deployment: follow the recipe below. Existing deployment: [resume access](#resume-an-existing-deployment), then choose an operation. Use workstation Bash, keep tracing off and stop at a failed command. Creation is not a replay or repair program.
 
-Linux amd64, Kubernetes 1.30 or later, one application replica, native Forgejo 16.0.7 or 17.0.1, forward replacement upgrade 16.0.7 to 17.0.1. Native initialization/migration runs in an isolated finite prepare Job; ordinary pod restart runs native serve without restore or backup access. Failed or interrupted mutation remains stopped; retry uses an independent empty target, not deletion of failure markers. Actions, mail, mirrors, federation and external webhooks are disabled. This is a planned-interruption profile, not a provider-loss fencing implementation.
+## Supported profile and release
 
-Release 0.1.0 was qualified on Hetzner with K3s 1.36.5, Helm 4.3.1, Bartlized Restic 0.2.1 and Keycloak 0.5.1. The retained image and chart passed initialization with and without backup configuration, restart without backup access, independent-state restore and native 16.0.7 to 17.0.1 upgrade. Git over HTTP/SSH, LFS, issues, pull requests, attachments, packages, permissions and SSH identity were checked after reconstruction. Native Keycloak login was also exercised through a real browser over HTTPS.
+Published **0.2.2** supports Linux amd64, Kubernetes 1.30+, one application replica and native Forgejo 16.0.7 or 17.0.1. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
 
-| Release | SHA256 |
-| --- | --- |
-| 16.0.7 | `ca8ecb37da9210d5730c878308bf31e25b6b526a7294b263d07f6c8718af07b7` |
-| 17.0.1 | `51a8cdf4a1252e79f4b3855d7a7891af6c6635105420768c460e2f0690385d6f` |
+Supply the [operator tools](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#check-the-workstation), an existing version-1 installation record with complete cluster/resource references and retained access, enforced NetworkPolicy, Traefik, cert-manager and state/staging/reconstruction capacity. [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md) supplies a single-node profile; an equivalent cluster suffices. Compatible external OIDC/Restic services work without another Bartl package or company tooling.
 
-Failure qualification covered malformed backup lookup, corrupt selected recovery data, interrupted preparation, stop taking precedence, publication failure/retry, and downgrade refusal without changing native files or recovery inputs. Planned removal completed pending publication before uninstall; retained-state reinstall produced another backup whose newly written Git files, issue and package were recovered independently.
-
-In the final retained-state reinstall check, the subsequent backup recorded 15.651 seconds of observed serving-Pod readiness interruption, with a polling upper bound of 17.087 seconds. This measures the synthetic fixture on the qualified single-node placement, not end-user availability or a production interruption guarantee.
-
-Restic 0.19.1 can report snapshot listing errors on stderr while returning exit status zero and an empty or partial JSON list. The package therefore requires both successful exit and a clean diagnostic channel before interpreting backup absence. It retains native filtering and locking rather than adding another enumeration engine.
-
-### Historical release 0.1.0 artifacts
-
-| Artifact | Immutable identity |
-| --- | --- |
-| Image | `ghcr.io/bartlapp/bartl-forgejo-controller@sha256:e6b4eae6d8b832d0465fdfd12efae57f0cce1bb7de61d6b26b6d4ff67db7f929` |
-| Chart | `oci://ghcr.io/bartlapp/bartl-forgejo@sha256:c9d6e7189d29b7b2923a61c5036e38197005912fdd68c6acec6a78654e297f3c` |
-| Chart archive SHA256 | `9cea9c65c1bcd111ea86181103cba22b6e86f36f1b9f0e8778ca3449c256f067` |
-| Build source tree | `5093bae8bf1aa30e24f4d9187284aeb2121e3eaf` |
-| Build source archive SHA256 | `9dc5553a50b122055110ebb257def54a1d8cb165ee24ae7a62dd0abb1c83b2f1` |
-
-The exact image build tree remains reachable at `refs/evidence/candidate-05-source`. Qualification used `tests/package-proof.mjs`; its final removal continuation binds the preceding fourteen passed cases to the same image and source identities. The image was not rebuilt. The chart was repackaged solely to reference the consistent `bartl-forgejo-controller` image name; installation from its published digest, current-generation readiness and access to restored repository content were then verified on Hetzner. Both packages are public. Anonymous chart download and checksum, image manifest digest and access to every image blob were verified.
-
-The qualified placement was one K3s node with independent per-slot volumes and synthetic data. These results establish application reconstruction and planned replacement, not host/provider-loss recovery or production-scale interruption limits. `tests/native.sh` and `tests/native-fixture.mjs` retain the underlying native recipe.
-
-## Obtain and prepare release 0.2.2
-
-The shared-file chart retains the immutable runtime image above. Historical 0.1.0 evidence does not qualify the new preparation procedure; exact 0.2.2 identities and observed qualification belong in its [release record](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2). The old flat values interface is not accepted. This release omits disabled backup configuration and empty manual-only schedules, matching the existing CRD.
-
-Use Bash, Helm 4, compatible kubectl, Mike Farah yq v4, jq, OpenSSL, curl and shasum, with shell tracing off. The target needs Linux amd64, enforced NetworkPolicy, Traefik, cert-manager and sufficient state/staging/reconstruction capacity. Compatible external OIDC and HTTPS Restic services suffice; no other Bartl package or company-specific tooling is necessary.
-
-Use the complete version-1 resource graph retained by [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md). For an external target, obtain its authoritative resource description and selected kubeconfig context from its administrator and retain them in `VALUES` before selecting a deployment. Under the [resource contract](https://github.com/bartlapp/bartl-app/blob/main/docs/how-to-bartlize.md#versioned-resource-contract), self-managed K3s requires its node VM entries and their provider bindings; provider-managed EKS requires its provider binding and configuration. Record actual management, ownership, scope and protected credential references, not guessed values or a context-only cluster. These are the schema's current cluster profiles; other implementations need a supported resource description before this recipe applies. Forgejo does not provision infrastructure. An unversioned existing record needs coordinated resource/consumer migration, not just a version field.
-
-`CUSTOMER_ID` identifies the customer (for example `acme`); `INSTALLATION_ID` identifies its operational unit and defaults to the customer ID. Separate installations follow access and credential boundaries, not cluster count. `BASE_DOMAIN` supplies `dns.root` for new records (for example `acme.fke.systems`). `CLUSTER_ID` selects a stable `clusters` key such as `cluster-1`; `KUBE_CONTEXT` is read from that cluster's retained `kubeconfig.context`, not the terminal's current context.
+Select the existing installation directory. Acquire the archive or restore its independently retained bytes to the same path:
 
 ```bash
 set -euo pipefail
 umask 077
-CUSTOMER_ID=${CUSTOMER_ID:-acme}
-INSTALLATION_ID=${INSTALLATION_ID:-$CUSTOMER_ID}
-WORK_DIR_ROOT=${WORK_DIR_ROOT:-"$HOME/bartl"}
-WORK_DIR=${WORK_DIR:-"$WORK_DIR_ROOT/$CUSTOMER_ID/${INSTALLATION_ID}-installation"}
-case "$WORK_DIR" in /*) ;; *) printf 'Absolute WORK_DIR required\n' >&2; exit 1;; esac
-VALUES="$WORK_DIR/installation.yaml"
-case "$VALUES" in /*) ;; *) printf 'Absolute VALUES required\n' >&2; exit 1;; esac
-DEPLOYMENT=${DEPLOYMENT:-forgejo}
+export WORK_DIR="$HOME/bartl/acme/acme-installation"
+export VALUES="$WORK_DIR/installation.yaml"
 mkdir -p "$WORK_DIR/packages"
-if [ ! -e "$VALUES" ]; then
-  CUSTOMER_ID="$CUSTOMER_ID" INSTALLATION_ID="$INSTALLATION_ID" BASE_DOMAIN="${BASE_DOMAIN:-acme.fke.systems}" \
-    yq -n '.schemaVersion = 1 | .customer = strenv(CUSTOMER_ID) | .installation = strenv(INSTALLATION_ID) | .dns.root = strenv(BASE_DOMAIN)' > "$VALUES"
-fi
-yq -e '.schemaVersion == 1 and (.customer != null) and (.installation != null)' "$VALUES" >/dev/null
-CLUSTER_ID=${CLUSTER_ID:-cluster-1}
-DEPLOYMENT="$DEPLOYMENT" CLUSTER_ID="$CLUSTER_ID" yq -i '
-  .deployments[strenv(DEPLOYMENT)] = ({
-    "instance":"forgejo","cluster":strenv(CLUSTER_ID),"namespace":"forgejo-blue",
-    "release":"forgejo","package":"forgejo"} * (.deployments[strenv(DEPLOYMENT)] // {})) |
-  .packages[.deployments[strenv(DEPLOYMENT)].package] = ({"version":"0.2.2","chart":"oci://ghcr.io/bartlapp/bartl-forgejo",
-    "chartSha256":"16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664"} * (.packages[.deployments[strenv(DEPLOYMENT)].package] // {})) |
-  .services[.deployments[strenv(DEPLOYMENT)].instance] = ({"release":"0.2.2","bootstrapSecret":"forgejo-bootstrap"} * (.services[.deployments[strenv(DEPLOYMENT)].instance] // {}))
-' "$VALUES"
-INSTANCE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
-CLUSTER_ID=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
-NS=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
-RELEASE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
-PACKAGE=$(DEPLOYMENT="$DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-KUBE_CONTEXT=$(CLUSTER_ID="$CLUSTER_ID" yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
-test -n "$KUBE_CONTEXT" || { printf 'Record the selected cluster context before continuing\n' >&2; exit 1; }
-# ACCESS_KUBECONFIG is an explicitly supplied file for ACCESS_CLUSTER only.
-if [ -n "${ACCESS_KUBECONFIG:-}" ] && [ "${ACCESS_CLUSTER:-}" = "$CLUSTER_ID" ]; then
-  export KUBECONFIG="$ACCESS_KUBECONFIG"
-else
-  export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
-fi
-kubectl --kubeconfig "$KUBECONFIG" config get-contexts "$KUBE_CONTEXT" -o name |
-  jq -Rse --arg ctx "$KUBE_CONTEXT" 'split("\n") | index($ctx) != null' >/dev/null
-VERSION=$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
-CHART_REF=$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].chart' "$VALUES")
-CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
-test -s "$CHART" || helm pull "$CHART_REF" --version "$VERSION" --destination "$WORK_DIR/packages"
-printf '%s  %s\n' "$(PACKAGE="$PACKAGE" yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")" "$CHART" |
-  shasum -a 256 --check -
-INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
-if [ "$DEPLOYMENT" != "$INSTANCE" ]; then
-  INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"
-fi
-mkdir -p "$INSTALL_DIR/protected/identity" "$INSTALL_DIR/protected/bootstrap"
-HELM_INTENT=()
-for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version hostname:hostname; do
-  key=${mapping%%:*}; field=${mapping#*:}
-  if DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -e '.operations.deployments[strenv(DEPLOYMENT)] | has(strenv(KEY))' "$VALUES" >/dev/null; then
-    value=$(DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -r '.operations.deployments[strenv(DEPLOYMENT)][strenv(KEY)]' "$VALUES")
-    case "$key" in replicas|ingressEnabled) HELM_INTENT+=(--set "services.${INSTANCE//./\\.}.$field=$value") ;;
-      *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
-  fi
-done
-kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
-kubectl --context "$KUBE_CONTEXT" create namespace "$NS" --dry-run=client -o yaml |
-  kubectl --context "$KUBE_CONTEXT" apply -f -
+helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.2.2 --destination "$WORK_DIR/packages"
+CHART="$WORK_DIR/packages/bartl-forgejo-0.2.2.tgz"
+CHART_SHA256=16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664
+printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
 ```
 
-Retain the verified archive, image, shared values and protected inputs independently of the target's failure domain. The defaults above are for a new ACME installation only; existing records are authoritative. Set the installation identity, DNS root and required service choices in `"$VALUES"` before continuing. Never replace an existing file with an example.
+The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact artifacts and exercised behavior; this rewritten sequence is not renewed live qualification. The source-only backup-declaration eligibility correction is unreleased and requires a new chart version. These commands use explicit backup selection and do not depend on it. Old flat values are not accepted by 0.2.2.
 
-The default service derives its hostname and selects native 17.0.1 with one replica. `services.<instance>.hostname` overrides derivation; omission restores it. Another logical instance uses its own service key and `--set-string instance=...`. Deployment identity retains cluster, namespace, Helm release and package selection separately from stable application identity. Keep installation/instance identity across replacement. Selected service fields are strict; unrelated services and infrastructure are ignored. Use complete reviewed values, not `--reuse-values`. Resume by selecting `WORK_DIR` and `DEPLOYMENT` and rerunning the derivation above; no new credentials or installation file are required.
+Retain chart/image, configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
 
-### Declare storage and connections
+## Configure a new deployment
 
-Offline declarations use package-owned helpers and work before dependencies exist:
+Choose unused deployment, service and package keys and a fresh namespace. These assignments preserve unrelated installation entries. Use the replacement sequence for another deployment of the same logical instance.
 
 ```bash
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=connections \
-  --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
-CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
-FORGEJO_URL=$(INSTANCE="$INSTANCE" yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
-FORGEJO_HOST=$(INSTANCE="$INSTANCE" yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+export DEPLOYMENT=forgejo
+export INSTANCE=forgejo
+export CLUSTER_ID=cluster-1
+export NS=forgejo-blue
+export RELEASE=forgejo
+export PACKAGE=forgejo
+export CHART_SHA256
+yq -i '.deployments[strenv(DEPLOYMENT)] = {
+  "instance": strenv(INSTANCE), "cluster": strenv(CLUSTER_ID),
+  "namespace": strenv(NS), "release": strenv(RELEASE), "package": strenv(PACKAGE)
+} | .services[strenv(INSTANCE)] = {"bootstrapSecret": "forgejo-bootstrap"} |
+  .packages[strenv(PACKAGE)] = {
+    "version": "0.2.2", "chart": "oci://ghcr.io/bartlapp/bartl-forgejo", "chartSha256": strenv(CHART_SHA256)
+  }' "$VALUES"
 ```
 
-Public paths are `services.<instance>.endpoints.{https,ssh}`, `oidc.requests.<instance>`, `backup.requests.<instance>`, `credentials.{requirements,bindings}.<instance>` and `storage.claims.<instance>.{state,staging}`. They declare requirements, not already issued credentials, clients or repositories. Rerender after changing choices.
+The service defaults to native 17.0.1 and a hostname derived from dns.root. Set optional hostname, claim, SSH/TLS or dependency choices before rendering. Read the selected access and declare connections:
 
-Unreleased source correction: `backup.requests.<instance>.enabled` consistently means eligibility for connection preparation: omission is eligible, explicit `backup.enabled: false` opts out. Conditional reader/writer requirements describe what a selected backup needs, not credentials to create for an unbound application. Standalone deployment without a destination still has no backup; `enabled: true` in service choices requires a destination. Released 0.2.2 declares an omitted choice ineligible; the correction needs a new chart release and is not covered by that release's qualification.
+```bash
+INSTANCE=$(yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
+CLUSTER_ID=$(yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
+NS=$(yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
+RELEASE=$(yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
+PACKAGE=$(yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
+export INSTANCE CLUSTER_ID PACKAGE
+HELM_INSTANCE=${INSTANCE//./\\.}
+KUBE_CONTEXT=$(yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
+export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
+# Replace only with an access file supplied for this selected cluster.
+VERSION=$(yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
+test "$VERSION" = 0.2.2
+CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
+CHART_SHA256=$(yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")
+printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
+INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
+if [ "$DEPLOYMENT" != "$INSTANCE" ]; then INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"; fi
+mkdir -p "$INSTALL_DIR"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+mkdir -p "$INSTALL_DIR/protected/identity" "$INSTALL_DIR/protected/bootstrap"
+kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
+kubectl --context "$KUBE_CONTEXT" create namespace "$NS"
+```
 
-Create two distinct operator-owned filesystem PVCs, writable by UID/GID 1000 with fsGroup 1000, supporting SQLite locks, atomic rename and fsync. State holds repositories, LFS, SQLite, attachments, packages, releases, indexes, queues and logs. Staging holds a complete independent capture plus integrity metadata and failed-publication headroom. These example 20Gi capacities are lab choices, not production sizing:
+Never inherit source access when selecting another target. The four optional deployment intents are replicas, ingressEnabled, native version and hostname; 0.2.2 consumes instance and explicit Helm overrides, not a deployment selector. Absent intent leaves chart/service settings effective.
+
+Create two independent operator-owned claims, writable by UID/GID and fsGroup 1000, supporting SQLite locks, atomic rename and fsync. Adjust the example capacities once before creation:
 
 ```bash
 for role in state staging; do
-  CLAIM=$(INSTANCE="$INSTANCE" ROLE="$role" yq -er \
-    '.storage.claims[strenv(INSTANCE)][strenv(ROLE)].claimName' "$CONNECTIONS")
-  kubectl --context "$KUBE_CONTEXT" -n "$NS" apply -f - <<EOF
+  CLAIM=$(ROLE="$role" yq -er '.storage.claims[strenv(INSTANCE)][strenv(ROLE)].claimName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create -f - <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -150,383 +111,853 @@ EOF
 done
 ```
 
-Override names through `services.<instance>.claims.{state,staging}` before rendering. WaitForFirstConsumer claims can remain Pending until scheduling. Concurrent writers are forbidden regardless of access mode. The package never deletes claims or supplied Secrets. The staging copy allows service to resume while Restic publishes and preserves failed publication for retry; it trades copy work and capacity against a longer stopped interval.
+State contains SQLite, Git/LFS, attachments, packages, releases, queues, indexes and logs. Staging holds a complete independent capture and integrity metadata plus failed-publication headroom. WaitForFirstConsumer claims may remain Pending until scheduling. Never share a claim between active writers; the package does not delete claims or supplied Secrets.
 
-### TLS and actual SSH exposure
+## DNS, TLS and SSH exposure
 
-Point the declared HTTPS hostname to the ingress address, confirm authoritative/public DNS and permit ports 80/443. Default `tls.managed: true` creates namespace-local ACME Issuer/Certificate resources using Traefik; cert-manager owns renewal. `tls.acmeServer` may select staging, which is not browser-trusted. `ingress.enabled: false` withholds HTTP routing without disabling certificate preparation.
-
-For externally managed TLS set `services.<instance>.tls.managed: false`, rerender, then create its declared Secret:
+Inspect the selected ingress address and create/update only the authorized hostname record. Correct conflicting AAAA records, then require authoritative/public answers before ACME:
 
 ```bash
-TLS_SECRET=$(INSTANCE="$INSTANCE" yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
-# External TLS mode only:
-# kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret tls "$TLS_SECRET" \
-#   --cert=/protected/tls/fullchain.pem --key=/protected/tls/key.pem \
-#   --dry-run=client -o yaml | kubectl --context "$KUBE_CONTEXT" apply -f -
+kubectl --context "$KUBE_CONTEXT" -n kube-system get service traefik -o wide
+printf 'HTTPS: %s; SSH: %s:%s\n' "$FORGEJO_HOST" "$SSH_HOST" "$SSH_PORT"
+dig "$FORGEJO_HOST" A +trace
+dig @1.1.1.1 +short "$FORGEJO_HOST" A
+dig @8.8.8.8 +short "$FORGEJO_HOST" A
 ```
 
-Do not silently adopt existing manually managed certificates. An HTTP Ingress does not expose SSH: the chart creates native TCP Service `forgejo-ssh`, default type LoadBalancer on port 2222. The target must provide that LoadBalancer and firewall reachability. K3s ServiceLB requires the port available on the node. Point the declared SSH hostname to that reachable address; use `ssh.hostname` if it differs from HTTP. Alternatively set `ssh.exposure: NodePort` and explicit `ssh.nodePort`, expose it on the node firewall and route DNS there; the generated native configuration advertises that node port. `ClusterIP` requires an independently supplied TCP route to the declared Service/port. Inspect `kubectl -n "$NS" get service forgejo-ssh -o wide`, test actual SSH clone/push and retain its host-key fingerprint before activation.
-
-### Standalone external dependencies
-
-For optional OIDC set `services.<instance>.oidc.issuer` to the compatible provider's supplied issuer. Optional `clientId` and source `name` default to the instance and `keycloak`. Rerender and register exactly the declared `oidc.requests.<instance>.{clientId,redirectUris,webOrigins}` as a confidential authorization-code client, with PKCE S256 and no implicit/password grant. Retain its issued secret as `"$INSTALL_DIR/protected/oidc-client-secret"` without a newline; never regenerate it on replay. Native Forgejo registration follows below. Omit OIDC for local-only access.
-
-For optional backup set `services.<instance>.backup.repository` to an initialized compatible HTTPS Restic repository, such as `rest:https://backup.example/forgejo/`. No `resolved` section is needed. Place retained reader/writer inputs in `protected/backup/reader/` and `writer/`; each contains `password` (the same repository encryption key), `username`, `restPassword` and optional `ca.crt`. Readers need native lock writes/removal but no backup-content mutation; writers must be append-only. Keep initialization, retention, destructive maintenance, monitoring and replication authority separate. Never regenerate a key for an existing repository.
-
-After rerendering connections, create the backup Secrets only when backup is selected:
+Managed TLS needs cert-manager and public ports 80/443; it creates a namespace-local ACME Issuer/Certificate and renews it. Staging ACME is not browser-trusted. For **external TLS only**, set tls.managed: false before rendering, then create the declared Secret from the supplied certificate/key:
 
 ```bash
-for role in reader writer; do
-  case "$role" in reader) BINDING=backupReader ;; writer) BINDING=backupWriter ;; esac
-  SECRET=$(INSTANCE="$INSTANCE" BINDING="$BINDING" yq -er \
-    '.credentials.bindings[strenv(INSTANCE)][strenv(BINDING)].secretName' "$CONNECTIONS")
-  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$SECRET" \
-    --from-file="$INSTALL_DIR/protected/backup/$role/" --dry-run=client -o yaml |
-    kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
-done
+TLS_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret tls "$TLS_SECRET" \
+  --cert="$INSTALL_DIR/tls/fullchain.pem" --key="$INSTALL_DIR/tls/key.pem"
 ```
 
-Omission means no store; `backup.enabled: false` explicitly disables it. Schedule defaults to empty (manual capture), time zone to UTC; select `backup.schedule`/`timeZone` for scheduled protection. Empty local state initializes when no store or no backup exists; lookup/integrity failure never means absence. Backup access reaches only the Jobs needing it, never the serving process.
+Preserve external ownership on later upgrades. The install command below derives the binding independently in managed mode; it never depends on this optional block.
 
-### Retained native identity and configuration
+HTTP ingress does not expose SSH. The default forgejo-ssh Service is LoadBalancer port 2222; the environment must supply the load balancer and firewall reachability. K3s ServiceLB needs that node port free. Point the declared SSH hostname to that address. NodePort requires an explicit ssh.nodePort and firewall/DNS routing; ClusterIP requires a separately supplied TCP route. Native configuration advertises the selected external port. Verify actual SSH connectivity and retained host identity after installation, not only a Service object.
 
-For recovery restore the independently retained identity files first: **never generate replacement keys for recovered state**. For genuinely fresh initialization only, create missing values once:
+## Optional external dependencies
 
-```bash
-for key in SECRET_KEY INTERNAL_TOKEN LFS_JWT_SECRET; do
-  file="$INSTALL_DIR/protected/identity/$key"
-  if [ -e "$file" ]; then test -s "$file"
-  else (set -o noclobber; openssl rand -hex 32 | tr -d '\n' > "$file")
-  fi
-done
-```
-
-Place chosen `username`, `email` and a strong retained `password` in `protected/bootstrap/`, each as a separate file. Bootstrap is used for genuinely empty initialization only, not recovered accounts:
+For external OIDC, choose the provider-supplied issuer and render its client/callback requirements:
 
 ```bash
-BOOTSTRAP_SECRET=$(INSTANCE="$INSTANCE" yq -er '.credentials.bindings[strenv(INSTANCE)].bootstrap.secretName' "$CONNECTIONS")
-kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$BOOTSTRAP_SECRET" \
-  --from-file="$INSTALL_DIR/protected/bootstrap/" --dry-run=client -o yaml |
-  kubectl --context "$KUBE_CONTEXT" apply -f -
+export OIDC_ISSUER=https://login.example.org/realms/acme
+yq -i '.services[strenv(INSTANCE)].oidc.issuer = strenv(OIDC_ISSUER)' "$VALUES"
 helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=configuration \
-  --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+yq '.oidc.requests[strenv(INSTANCE)]' "$CONNECTIONS"
+```
+
+Register a confidential authorization-code client with the declared callbacks/origins, S256 PKCE and no implicit/password grant. Retain its secret without a newline at INSTALL_DIR/protected/oidc-client-secret. No OIDC selection means local-only access. For composed Keycloak use the dedicated section below instead; native Forgejo authentication-source registration follows installation.
+
+For backup, supply a dedicated initialized HTTPS Restic repository and independently retained scoped inputs. [Restic's handoff](https://github.com/bartlapp/bartl-restic/blob/main/README.md#connect-an-application) supplies compatible files; an external service is sufficient:
+
+```bash
+export REPOSITORY_URL=rest:https://backup.example.org/forgejo/
+yq -i '.services[strenv(INSTANCE)].backup.repository = strenv(REPOSITORY_URL)' "$VALUES"
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+```
+
+Put reader/writer directories under INSTALL_DIR/repository/, each containing password (shared repository encryption key), username, restPassword and optional ca.crt. Restore older protected/backup inputs here if needed; never regenerate existing-history keys. Reader may manage native locks but not backup contents; writer is append-only. Admin/retention/replication authority stays with the backup service.
+
+Create runtime copies only when backup is selected:
+
+```bash
+for pair in reader:backupReader writer:backupWriter; do
+  directory=${pair%%:*}; role=${pair#*:}
+  name=$(ROLE="$role" yq -er '.credentials.bindings[strenv(INSTANCE)][strenv(ROLE)].secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$name" \
+    --from-file="$INSTALL_DIR/repository/$directory/"
+done
+```
+
+Omission means no backup; explicit backup.enabled: false disables it. Schedule is empty by default (manual-only), timeZone UTC. Set an agreed schedule under services.<instance>.backup.schedule. Lookup or integrity errors never mean absent history. Serving processes receive no repository access.
+
+## Optional composition with Keycloak and Restic
+
+First operate the selected providers through their own release READMEs. Do not create their deployments, credentials or storage here. Historical composition used Keycloak 0.6.1 and Restic 0.3.0; the current Keycloak candidate has a different deployment interface. Consume current declaration files from those procedures, not guessed endpoints or provider CRs.
+
+For **Keycloak instead of direct oidc.issuer**, select its retained deployment and declaration file:
+
+```bash
+export KC_DEPLOYMENT=keycloak
+export KC_CONNECTIONS="$WORK_DIR/clusters/cluster-1/applications/keycloak/connections.yaml"
+KC_INSTANCE=$(yq -er '.deployments[strenv(KC_DEPLOYMENT)].instance' "$VALUES")
+export KC_INSTANCE
+yq -i '.services[strenv(INSTANCE)].identityProvider = strenv(KC_INSTANCE)' "$VALUES"
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+KC_URL=$(yq -er '.services[strenv(KC_INSTANCE)].endpoints.https.url' "$KC_CONNECTIONS")
+OIDC_ISSUER=$(yq -er '.services[strenv(KC_INSTANCE)].oidc.issuer' "$KC_CONNECTIONS")
+OIDC_CLIENT_ID=$(yq -er '.oidc.requests[strenv(INSTANCE)].clientId' "$INSTALL_DIR/forgejo-connections.yaml")
+export OIDC_ISSUER OIDC_CLIENT_ID
+yq -i '.resolved.oidc.bindings[strenv(INSTANCE)] = {
+  "provider": strenv(KC_INSTANCE), "issuer": strenv(OIDC_ISSUER), "clientId": strenv(OIDC_CLIENT_ID)
+}' "$VALUES"
+```
+
+The provider binding must match identityProvider. For **composed backup instead of direct backup.repository**, use the selected Restic deployment's declarations and an already admitted dedicated repository:
+
+```bash
+export RESTIC_DEPLOYMENT=restic
+export RESTIC_CONNECTIONS="$WORK_DIR/clusters/cluster-1/applications/restic/restic-connections.yaml"
+export REPOSITORY_NAME=forgejo
+RESTIC_INSTANCE=$(yq -er '.deployments[strenv(RESTIC_DEPLOYMENT)].instance' "$VALUES")
+export RESTIC_INSTANCE
+BACKUP_REPOSITORY=$(yq -er '.backup.providers[strenv(RESTIC_INSTANCE)].repositories[strenv(REPOSITORY_NAME)].repository' "$RESTIC_CONNECTIONS")
+export BACKUP_REPOSITORY
+yq -i '.services[strenv(INSTANCE)].backup.endpoint = strenv(RESTIC_INSTANCE) |
+  .resolved.backup.bindings[strenv(INSTANCE)] = {
+    "endpoint": strenv(RESTIC_INSTANCE), "repository": strenv(BACKUP_REPOSITORY)
+  }' "$VALUES"
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+for pair in reader:backupReader writer:backupWriter; do
+  directory=${pair%%:*}; role=${pair#*:}
+  name=$(ROLE="$role" yq -er '.credentials.bindings[strenv(INSTANCE)][strenv(ROLE)].secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$name" \
+    --from-file="$INSTALL_DIR/repository/$directory/"
+done
+```
+
+Starting condition: no direct repository override for this composed consumer, and scoped repository input files already supplied through Restic's handoff. Preserve keys and transport passwords. Refresh derived bindings after provider choices change; declarations neither create a repository nor prove protection.
+
+### Provision the native Keycloak client
+
+Use a current authorized master-realm administrator with admin-cli password grant and realm/client creation/read/secret access. Supply its files under protected/keycloak-admin. It is preparation-only, never a Forgejo runtime credential. Inspect the realm and declared client first:
+
+```bash
+ADMIN_DIR="$INSTALL_DIR/protected/keycloak-admin"
+CLIENT_WORK=$(mktemp -d "$INSTALL_DIR/protected/keycloak-client.XXXXXX")
+curl --fail-with-body --silent --show-error "$KC_URL/realms/master/protocol/openid-connect/token" \
+  --data-urlencode client_id=admin-cli --data-urlencode grant_type=password \
+  --data-urlencode "username@$ADMIN_DIR/username" --data-urlencode "password@$ADMIN_DIR/password" > "$CLIENT_WORK/token.json"
+TOKEN=$(jq -er '.access_token' "$CLIENT_WORK/token.json")
+REALM=${OIDC_ISSUER##*/}
+REALM_PATH=$(jq -nr --arg realm "$REALM" '$realm | @uri')
+ADMIN_URL="$KC_URL/admin/realms/$REALM_PATH"
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl --config - --fail-with-body --silent --show-error "$KC_URL/admin/realms" | jq '.[].realm'
+yq -o=json '.oidc.requests[strenv(INSTANCE)]' "$INSTALL_DIR/forgejo-connections.yaml" |
+  jq '{clientId, redirectUris, webOrigins, protocol: "openid-connect", enabled: true,
+    publicClient: false, standardFlowEnabled: true, directAccessGrantsEnabled: false,
+    implicitFlowEnabled: false, serviceAccountsEnabled: false,
+    attributes: {"pkce.code.challenge.method": "S256"}}' > "$CLIENT_WORK/client.json"
+cat "$CLIENT_WORK/client.json"
+```
+
+For an absent authorized realm only, create it once; otherwise preserve the enabled realm/users:
+
+```bash
+jq -n --arg realm "$REALM" '{realm: $realm, enabled: true}' > "$CLIENT_WORK/realm.json"
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl --config - --fail-with-body --silent --show-error --request POST "$KC_URL/admin/realms" \
+    --header 'Content-Type: application/json' --data-binary "@$CLIENT_WORK/realm.json"
+```
+
+Inspect the client by its exact ID:
+
+```bash
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl --config - --fail-with-body --silent --show-error --get "$ADMIN_URL/clients" \
+    --data-urlencode "clientId=$OIDC_CLIENT_ID" > "$CLIENT_WORK/clients.json"
+jq . "$CLIENT_WORK/clients.json"
+```
+
+If absent and authorized, create it. Otherwise inspect the existing callbacks/origins, enabled confidential standard flow, S256 PKCE and disabled implicit/direct grants/service accounts. Reconcile differences deliberately, never reset a restored client:
+
+```bash
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl --config - --fail-with-body --silent --show-error --request POST "$ADMIN_URL/clients" \
+    --header 'Content-Type: application/json' --data-binary "@$CLIENT_WORK/client.json"
+```
+
+Retrieve its existing secret with GET, not rotating POST. The retained destination must be new; for an existing file, compare retrieved bytes and coordinate mismatches rather than overwrite:
+
+```bash
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl --config - --fail-with-body --silent --show-error --get "$ADMIN_URL/clients" \
+    --data-urlencode "clientId=$OIDC_CLIENT_ID" > "$CLIENT_WORK/clients.json"
+CLIENT_UUID=$(jq -er --arg id "$OIDC_CLIENT_ID" '[.[] | select(.clientId == $id)] |
+  if length == 1 then .[0].id else error("Expected exactly one client") end' "$CLIENT_WORK/clients.json")
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl --config - --fail-with-body --silent --show-error "$ADMIN_URL/clients/$CLIENT_UUID/client-secret" > "$CLIENT_WORK/secret.json"
+jq -erj '.value | select(length > 0)' "$CLIENT_WORK/secret.json" > "$CLIENT_WORK/secret"
+(set -o noclobber; cat "$CLIENT_WORK/secret" > "$INSTALL_DIR/protected/oidc-client-secret")
+unset TOKEN
+rm -r "$CLIENT_WORK"
+```
+
+Configure users and MFA through native Keycloak administration. Provider registration does not automatically link native Forgejo accounts.
+
+## Prepare native identity and configuration
+
+For a fresh installation only, create identity keys once in the empty directory. For recovery, restore the retained identity instead:
+
+```bash
+(
+  set -o noclobber
+  for key in SECRET_KEY INTERNAL_TOKEN LFS_JWT_SECRET; do
+    openssl rand -hex 32 | tr -d '\n' > "$INSTALL_DIR/protected/identity/$key"
+  done
+)
+```
+
+For fresh bootstrap, choose the local recovery administrator and retain its password:
+
+```bash
+export ADMIN_USER=admin
+export ADMIN_EMAIL=admin@example.org
+(
+  set -o noclobber
+  printf '%s' "$ADMIN_USER" > "$INSTALL_DIR/protected/bootstrap/username"
+  printf '%s' "$ADMIN_EMAIL" > "$INSTALL_DIR/protected/bootstrap/email"
+  openssl rand -hex 32 | tr -d '\n' > "$INSTALL_DIR/protected/bootstrap/password"
+)
+BOOTSTRAP_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].bootstrap.secretName' "$CONNECTIONS")
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$BOOTSTRAP_SECRET" --from-file="$INSTALL_DIR/protected/bootstrap/"
+```
+
+Bootstrap applies only to genuinely empty state. Render native configuration and append retained identity keys without printing protected content:
+
+```bash
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=configuration --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
-INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" \
-  > "$INSTALL_DIR/protected/app.ini"
+yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DIR/protected/app.ini"
 {
   printf '\n[security]\nSECRET_KEY = %s\nINTERNAL_TOKEN = %s\n' \
-    "$(cat "$INSTALL_DIR/protected/identity/SECRET_KEY")" \
-    "$(cat "$INSTALL_DIR/protected/identity/INTERNAL_TOKEN")"
-  printf '\n[server]\nLFS_JWT_SECRET = %s\n' \
-    "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
+    "$(cat "$INSTALL_DIR/protected/identity/SECRET_KEY")" "$(cat "$INSTALL_DIR/protected/identity/INTERNAL_TOKEN")"
+  printf '\n[server]\nLFS_JWT_SECRET = %s\n' "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
 } >> "$INSTALL_DIR/protected/app.ini"
-CONFIG_SECRET=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
+CONFIG_SECRET=$(yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
 kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
   --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
-  kubectl --context "$KUBE_CONTEXT" apply -f -
+  kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
 ```
 
-The chart supplies native paths, URLs, ports and disabled-effects settings; no operator-authored `app.ini` machinery is needed. Configuration rendering is offline and nonsecret; selected composed bindings must already match. Regeneration starts from the template and appends retained keys, never accumulates old settings. Keep additional external secret references independently. Capture contains native state and identity/version/inventory/checksum metadata; release, target configuration, TLS, bootstrap and backup credentials remain separate recovery inputs. Restic cache is disposable.
+Rendering starts from the chart template, not an old app.ini. It supplies native paths, URLs/ports and disabled-effect settings. Retain configuration/identity independently before installation. Backup captures native state and identity/version/integrity metadata; target configuration, TLS and repository credentials remain separate recovery inputs.
 
 ## Install and observe
 
 ```bash
-HELM_INTENT=()
-for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version hostname:hostname; do
-  key=${mapping%%:*}; field=${mapping#*:}
-  if DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -e '.operations.deployments[strenv(DEPLOYMENT)] | has(strenv(KEY))' "$VALUES" >/dev/null; then
-    value=$(DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -r '.operations.deployments[strenv(DEPLOYMENT)][strenv(KEY)]' "$VALUES")
-    case "$key" in replicas|ingressEnabled) HELM_INTENT+=(--set "services.${INSTANCE//./\\.}.$field=$value") ;;
-      *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
-  fi
-done
-helm upgrade --install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" \
-  -n "$NS" -f "$VALUES" --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" "${HELM_INTENT[@]}"
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=20m
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication forgejo -o yaml
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+if yq -e '.services[strenv(INSTANCE)].endpoints.https.tlsManaged' "$CONNECTIONS" >/dev/null; then
+  TLS_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
+fi
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get service forgejo-ssh -o wide
+curl --fail --silent --show-error --output /dev/null "$FORGEJO_URL"
 ```
 
-Skip Certificate waiting only for external TLS. Check HTTPS and actual TCP SSH access. Do not scale generated Deployments or run another writer.
-
-Before accepting a Ready, Stopped or failure condition, require both `status.observedGeneration` and that condition's `observedGeneration` to equal `metadata.generation`; `kubectl wait` alone can accept a stale condition from the preceding generation. Check the current operation phase, then perform authenticated HTTP/SSH clone and push, LFS and the agreed issue/package/release checks. Helm completion alone does not establish application success. Preparation automatically uses existing owned state; only absence selects the latest matching verified backup, otherwise native initialization. Supported migration is native startup. A normal restart does not restore state. Existing service continues during controller/API observation loss; unavailable observation cannot confirm stop or authorize a transition.
-
-## Capture and recovery
-
-```sh
-kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication forgejo \
-  forgejo.bartl.sh/backup-request="$(date -u +%Y%m%dT%H%M%SZ)" --overwrite
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication forgejo -o yaml
-```
-
-Wait for the requested value in `status.backup.request`, `success: true` and its snapshot identity. The controller drains writers, captures into the protected staging claim, resumes when current intent and capture safety permit, and publishes using Restic. Publication failure sets `BackupFailed` and retains the capture; it is separate from service health. The retained capture belongs to its original staging claim. Before replacement, finish publication with the original state claim, staging claim and version inputs; after failure, submit a unique backup request to retry. Pending publication rejects changes to those inputs without disrupting the healthy service. Do not delete the retained staging data or issue competing filesystem work. Failed capture or ambiguous state does not authorize restart. Inspect the result rather than assuming an annotation succeeded. The optional native Kubernetes CronJob submits this same interface; independent monitoring must detect absent, stale or failed backups.
-
-For recovery, provision an independent empty state claim and protected staging claim in a usable target cluster, preserve installation/instance identity, provide the selected compatible release, native configuration, reader access and independent keys, then execute the ordinary install command. Do not copy source-mounted state or set a restore mode. No backup selection fallback is implicit: damaged latest fails visibly. Keep the failed target stopped for diagnostics and retry on a new independent empty target. Before permitting production access, verify application behavior and withdraw predecessor write authority.
-
-## Replacement upgrade and promotion
-
-Retain a new `deployments.<replacement>` entry with the same `instance`, the selected cluster, namespace, release and package. A same-cluster replacement needs a distinct namespace (the chart owns fixed resource names). Nondefault deployment IDs use working files under `applications/$INSTANCE/deployments/$DEPLOYMENT`, keeping original files stationary. Never copy or symlink `installation.yaml`. Select the new `DEPLOYMENT` and rerun the target derivation. Restore protected native identity and supplied credentials from independent custody before creating Secrets. Connection/configuration rendering uses the same recorded target intent as installation.
-
-Keep differing source/candidate settings under `operations.deployments.<deployment>`: `replicas`, `ingressEnabled`, and, only when needed, native `version` and candidate `hostname`. The install block derives these Helm overrides from the record. Use a separate retained `packages` entry if the candidate selects another chart. Never overwrite the source package selection. For example, record source stop before reapplying it:
-
-```bash
-DEPLOYMENT="$DEPLOYMENT" yq -i '
-  .operations.deployments[strenv(DEPLOYMENT)].replicas = 0 |
-  .operations.deployments[strenv(DEPLOYMENT)].ingressEnabled = false
-' "$VALUES"
-```
-
-Run [Stop and removal](#stop-and-removal) for that selected deployment, applying its retained intent and waiting for current-generation `Stopped`, then complete source retirement below before selecting the candidate. Do not use the install block's `Ready` wait for a zero-replica source. Changing shared service defaults must not reactivate it.
-
-
-Prepare an isolated nonproductive slot without production routing or effects. Record its differing hostname/version under the deployment's operating intent above, then rerender declarations and native configuration with retained identity keys and `HELM_INTENT`. Validate endpoint/TLS and restrict validation access; ingress need not be entirely disabled. LFS returns absolute object URLs, so functional checks require the candidate's real native endpoint, not client-side URL rewriting. Select the supported 16.0.7 to 17.0.1 forward transition and invoke ordinary installation on independent empty claims. The native procedure restores the captured release, flushes native queue state, then lets the newer native binary perform its supported migration. Downgrades and unsupported transitions must fail rather than initialize over state.
-
-For planned promotion: arrange the accepted interruption and data-loss boundary; withdraw source ingress and direct SSH access; request and verify the final capture; set source `replicas: 0` and await confirmed `Stopped`. Prevent source restart and direct volume access. Reconstruct the candidate from that final point using a fresh independent target where necessary, check useful behavior and preserved host keys/identity, then apply the intended production endpoint configuration and recheck before activating production HTTP and SSH routing. DNS alone is not fencing. The administrator records the active generation and accepted final-write boundary. If the source cannot be confirmed stopped or isolated, do not promote. If a candidate has accepted writes, never automatically reactivate its predecessor.
-
-When reusing the same hostname, complete the predecessor's CR finalization and Helm uninstall below after its final backup and confirmed stop, before enabling target routing. This retains its claims and supplied Secrets. Stop alone can leave an Ingress pointing at an empty backend and the Helm-owned SSH Service in place; two routes for the same hostname can send requests to the retired slot. Do not treat stopped processes as removal of those routing objects.
-
-## Stop and removal
-
-Ordinary stop is always allowed, including during pending or failed backup publication. Declare it through the application interface, not the generated Deployment:
-
-```sh
-DEPLOYMENT="$DEPLOYMENT" yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
-HELM_INTENT=()
-for mapping in replicas:replicas ingressEnabled:ingress.enabled version:version hostname:hostname; do
-  key=${mapping%%:*}; field=${mapping#*:}
-  if DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -e '.operations.deployments[strenv(DEPLOYMENT)] | has(strenv(KEY))' "$VALUES" >/dev/null; then
-    value=$(DEPLOYMENT="$DEPLOYMENT" KEY="$key" yq -r '.operations.deployments[strenv(DEPLOYMENT)][strenv(KEY)]' "$VALUES")
-    case "$key" in replicas|ingressEnabled) HELM_INTENT+=(--set "services.${INSTANCE//./\\.}.$field=$value") ;;
-      *) HELM_INTENT+=(--set-string "services.${INSTANCE//./\\.}.$field=$value") ;; esac
-  fi
-done
-helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" \
-  -f "$VALUES" --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" "${HELM_INTENT[@]}"
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=20m
-```
-
-Stop and uninstall are different operations. For planned uninstall, first finish any pending publication while retaining the controller, application CR, original state and staging claims, and version inputs. After publication failure, submit a new unique `forgejo.bartl.sh/backup-request` through the capture interface above. Wait until `status.backup.request` matches that request, `status.backup.success` is `true`, and a snapshot identity is recorded. Failed or unavailable backup publication postpones planned uninstall; it does not prevent ordinary stop. Do not rely on automatic recovery of pending publication across uninstall.
-
-Once publication is complete, declare stop as above. Require `status.observedGeneration` and the `Stopped` condition's `observedGeneration` to equal the current `metadata.generation`, with the condition `True`; the wait command alone is insufficient. Then delete the application CR while leaving the controller running until its finalizer has drained workloads and jobs, and only afterwards uninstall Helm:
-
-```sh
-kubectl --context "$KUBE_CONTEXT" -n "$NS" delete forgejoapplication forgejo --wait=true --timeout=20m
-helm uninstall "$RELEASE" --kube-context "$KUBE_CONTEXT" --namespace "$NS"
-```
-
-Do not uninstall first or force-remove the finalizer. Claims, supplied Secrets and the cluster-scoped CRD remain. Retain or explicitly dispose of them under the customer's retention decision. Authorized reinstall uses the retained inputs and ordinary install after confirming no predecessor can run. Avoid an intervening Helm upgrade between CR deletion and uninstall, which would recreate intent.
-
-## Optional composition with Keycloak 0.6.1 and Restic 0.3.0
-
-These remain independent releases, possibly on different clusters. Follow the complete [Keycloak preparation/install procedure](https://github.com/bartlapp/bartl-keycloak/blob/main/README.md) and [Restic procedure](https://github.com/bartlapp/bartl-restic/blob/main/README.md), including checksummed acquisition of the selected 0.6.1/0.3.0 charts, declared storage/Secrets, current-generation readiness, DNS/TLS, credential retention and operating limits. Their historical release evidence does not qualify changed preparation steps. Use the same `"$VALUES"` file and retained provider deployment mappings; do not install a provider implicitly by selecting it here.
-
-Set `services.<instance>.identityProvider: keycloak` instead of `oidc.issuer`. For backup set `services.<instance>.backup.endpoint: restic` instead of `backup.repository`, and declare the dedicated repository in `services.restic.repositories`. Initialize/admit it through Restic's ordinary Helm upgrade, not manual `restic init`; retain its encryption key and `reader.restPassword`/`writer.restPassword`/`admin.restPassword` separately as its README specifies. Do not pass admin access to Forgejo.
-
-Render the three public declarations with the selected verified archives. Derive provider placement/package selection from retained deployment IDs rather than retyping target namespaces:
-
-```bash
-KC_DEPLOYMENT=${KC_DEPLOYMENT:-keycloak}
-RESTIC_DEPLOYMENT=${RESTIC_DEPLOYMENT:-restic}
-KC_NS=$(DEPLOYMENT="$KC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
-KC_RELEASE=$(DEPLOYMENT="$KC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
-KC_PACKAGE=$(DEPLOYMENT="$KC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-KC_VERSION=$(PACKAGE="$KC_PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
-KC_CHART="$WORK_DIR/packages/bartl-keycloak-$KC_VERSION.tgz"
-RESTIC_NS=$(DEPLOYMENT="$RESTIC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
-RESTIC_RELEASE=$(DEPLOYMENT="$RESTIC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
-RESTIC_PACKAGE=$(DEPLOYMENT="$RESTIC_DEPLOYMENT" yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-RESTIC_VERSION=$(PACKAGE="$RESTIC_PACKAGE" yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
-RESTIC_CHART="$WORK_DIR/packages/bartl-restic-$RESTIC_VERSION.tgz"
-helm template "$KC_RELEASE" "$KC_CHART" -n "$KC_NS" -f "$VALUES" \
-  --set-string instance=keycloak --set-string services.keycloak.release="$KC_VERSION" --set-string renderMode=connections \
-  --show-only templates/connections.yaml > "$INSTALL_DIR/keycloak-connections.yaml"
-helm template "$RESTIC_RELEASE" "$RESTIC_CHART" -n "$RESTIC_NS" -f "$VALUES" \
-  --set-string instance=restic --set-string services.restic.release="$RESTIC_VERSION" --set-string renderMode=connections \
-  --show-only templates/connections.yaml > "$INSTALL_DIR/restic-connections.yaml"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.${INSTANCE//./\\.}.release=$VERSION" --set-string renderMode=connections \
-  --show-only templates/connections.yaml > "$CONNECTIONS"
-OIDC_ISSUER=$(yq -er '.services.keycloak.oidc.issuer' "$INSTALL_DIR/keycloak-connections.yaml")
-OIDC_CLIENT_ID=$(INSTANCE="$INSTANCE" yq -er '.oidc.requests[strenv(INSTANCE)].clientId' "$CONNECTIONS")
-KC_URL=$(yq -er '.services.keycloak.endpoints.https.url' "$INSTALL_DIR/keycloak-connections.yaml")
-# Select the repository name you declared in the Restic procedure.
-REPOSITORY_NAME=forgejo
-BACKUP_REPOSITORY=$(REPOSITORY_NAME="$REPOSITORY_NAME" yq -er \
-  '.backup.providers.restic.repositories[strenv(REPOSITORY_NAME)].repository' "$INSTALL_DIR/restic-connections.yaml")
-INSTANCE="$INSTANCE" OIDC_ISSUER="$OIDC_ISSUER" OIDC_CLIENT_ID="$OIDC_CLIENT_ID" \
-BACKUP_REPOSITORY="$BACKUP_REPOSITORY" yq -i '
-  .resolved.oidc.bindings[strenv(INSTANCE)] = {
-    "provider": "keycloak", "issuer": strenv(OIDC_ISSUER), "clientId": strenv(OIDC_CLIENT_ID)
-  } |
-  .resolved.backup.bindings[strenv(INSTANCE)] = {
-    "endpoint": "restic", "repository": strenv(BACKUP_REPOSITORY)
-  }
-' "$VALUES"
-```
-
-Bindings are nonsecret connection results, not overrides: provider/endpoint must match selection and issuer/repository must come from the selected declaration. Refresh after changing choices. Deployment/configuration reject missing or mismatched selected bindings; declaration rendering remains offline. Copy Restic's retained repository `password`, role username (`reader` or `writer`), role `*.restPassword` and validating CA into Forgejo's reader/writer directories, then create its declared Secrets using the standalone block. Keep existing repository keys and transport passwords unchanged on replay and recovery.
-
-### Provision the native Keycloak client without credential rotation
-
-This block applies after provider readiness. Supply current authorized Keycloak master-realm `admin-cli` username/password files under `protected/keycloak-admin`; the account needs realm/client creation, read and secret retrieval without interactive required actions. It is preparation-only, never a Forgejo runtime credential. Existing realms/users are not reset, and existing clients with conflicting settings are refused:
-
-```bash
-(
-  set -euo pipefail
-  WORK=$(mktemp -d "$INSTALL_DIR/protected/keycloak-client.XXXXXX")
-  trap 'rm -rf "$WORK"' EXIT
-  curl --fail-with-body --silent --show-error "$KC_URL/realms/master/protocol/openid-connect/token" \
-    --data-urlencode client_id=admin-cli --data-urlencode grant_type=password \
-    --data-urlencode "username@$INSTALL_DIR/protected/keycloak-admin/username" \
-    --data-urlencode "password@$INSTALL_DIR/protected/keycloak-admin/password" > "$WORK/token.json"
-  TOKEN=$(jq -er '.access_token | select(length > 0)' "$WORK/token.json")
-  kc() {
-    printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
-      curl --config - --fail-with-body --silent --show-error "$@"
-  }
-  REALM=${OIDC_ISSUER##*/}
-  REALM_PATH=$(jq -nr --arg realm "$REALM" '$realm | @uri')
-  ADMIN_URL="$KC_URL/admin/realms/$REALM_PATH"
-  kc "$KC_URL/admin/realms" > "$WORK/realms.json"
-  COUNT=$(jq --arg realm "$REALM" '[.[] | select(.realm == $realm)] | length' "$WORK/realms.json")
-  if [ "$COUNT" = 0 ]; then
-    jq -n --arg realm "$REALM" '{realm: $realm, enabled: true}' > "$WORK/realm.json"
-    kc --request POST "$KC_URL/admin/realms" --header 'Content-Type: application/json' --data-binary "@$WORK/realm.json"
-  else
-    jq -e --arg realm "$REALM" '[.[] | select(.realm == $realm)] | length == 1 and .[0].enabled == true' "$WORK/realms.json" >/dev/null
-  fi
-  INSTANCE="$INSTANCE" yq -o=json '.oidc.requests[strenv(INSTANCE)]' "$CONNECTIONS" |
-    jq '{clientId,redirectUris,webOrigins,protocol:"openid-connect",enabled:true,
-      publicClient:false,standardFlowEnabled:true,directAccessGrantsEnabled:false,
-      implicitFlowEnabled:false,serviceAccountsEnabled:false,
-      attributes:{"pkce.code.challenge.method":"S256"}}' > "$WORK/desired.json"
-  kc --get "$ADMIN_URL/clients" --data-urlencode "clientId=$OIDC_CLIENT_ID" > "$WORK/clients.json"
-  COUNT=$(jq --arg id "$OIDC_CLIENT_ID" '[.[] | select(.clientId == $id)] | length' "$WORK/clients.json")
-  if [ "$COUNT" = 0 ]; then
-    kc --request POST "$ADMIN_URL/clients" --header 'Content-Type: application/json' --data-binary "@$WORK/desired.json"
-    kc --get "$ADMIN_URL/clients" --data-urlencode "clientId=$OIDC_CLIENT_ID" > "$WORK/clients.json"
-  fi
-  CLIENT_UUID=$(jq -er --arg id "$OIDC_CLIENT_ID" '[.[] | select(.clientId == $id)] |
-    if length == 1 then .[0].id else error("Expected exactly one client") end' "$WORK/clients.json")
-  kc "$ADMIN_URL/clients/$CLIENT_UUID" > "$WORK/current.json"
-  jq -e --slurpfile desired "$WORK/desired.json" '
-    . as $actual | $desired[0] | to_entries |
-    all(.[]; . as $entry | if $entry.key == "attributes" then
-      $entry.value["pkce.code.challenge.method"] == $actual.attributes["pkce.code.challenge.method"]
-      else $entry.value == $actual[$entry.key] end)
-  ' "$WORK/current.json" >/dev/null || { printf 'Existing client differs; review without resetting it.\n' >&2; exit 1; }
-  # GET preserves the existing secret; POST would rotate it.
-  kc "$ADMIN_URL/clients/$CLIENT_UUID/client-secret" > "$WORK/secret.json"
-  jq -erj '.value | select(type == "string" and length > 0)' "$WORK/secret.json" > "$WORK/client-secret"
-  RETAINED="$INSTALL_DIR/protected/oidc-client-secret"
-  if [ -e "$RETAINED" ]; then cmp -s "$RETAINED" "$WORK/client-secret"
-  else (set -o noclobber; cat "$WORK/client-secret" > "$RETAINED")
-  fi
-)
-```
-
-Reconcile conflicting settings or secrets deliberately with the provider operator; never delete/recreate restored clients to bypass refusal. Assign users and MFA through native Keycloak administration, independently of application startup.
+Require current-generation Ready and the intended native version, trusted HTTPS and actual SSH reachability. Through authenticated HTTP/SSH, clone and push a synthetic repository; verify LFS, issues, pull requests, attachments, packages/releases, permissions and preserved SSH identity as used. LFS returns absolute object URLs, so use the real configured hostname, not client-side URL rewriting. A successful Helm invocation does not establish application acceptance.
 
 ### Register Forgejo's native authentication source
 
-After bindings are prepared, rerun configuration rendering/Secret preparation above and install Forgejo. For standalone external OIDC the same steps apply with the externally issued retained client secret. The chart's configuration output declares native OAuth arguments, discovery URL and callback; it does not mutate the authentication-source database. Use those arguments, not duplicated URL rules:
+For selected OIDC, configuration rendering declares native OAuth arguments, discovery URL and callback but does not mutate Forgejo's database. After successful installation, read those declarations and inspect native auth sources:
 
 ```bash
-(
-  set -euo pipefail
-  NAME=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].oidc.name' "$CONFIGURATION")
-  CLIENT=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].oidc.clientId' "$CONFIGURATION")
-  DISCOVERY=$(INSTANCE="$INSTANCE" yq -er '.configuration[strenv(INSTANCE)].oidc.discoveryUrl' "$CONFIGURATION")
-  VERSION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication forgejo -o jsonpath='{.spec.version}')
-  POD=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods \
-    -l app.kubernetes.io/name=forgejo,forgejo.bartl.sh/role=app -o json |
-    jq -er '[.items[] | select(.status.phase == "Running")] | if length == 1 then .[0].metadata.name else error("Expected one serving pod") end')
-  # Shell-quote every argument; the secret travels only over protected stdin.
-  quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
-  {
-    printf 'set -eu\n'
-    printf 'BIN=%s\nNAME=%s\nCLIENT=%s\nDISCOVERY=%s\nSECRET=%s\n' \
-      "$(quote "/usr/local/lib/forgejo/$VERSION/forgejo")" "$(quote "$NAME")" \
-      "$(quote "$CLIENT")" "$(quote "$DISCOVERY")" \
-      "$(quote "$(cat "$INSTALL_DIR/protected/oidc-client-secret")")"
-    cat <<'SCRIPT'
-auth() { "$BIN" --work-path /data --custom-path /data/custom --config /data/app.ini admin auth "$@"; }
-LIST=$(auth list)
-IDS=$(printf '%s\n' "$LIST" | while read -r id name rest; do
-  [ "$name" != "$NAME" ] || printf '%s\n' "$id"
-done)
-set -- $IDS
-if [ "$#" = 0 ]; then
-  auth add-oauth --name "$NAME" --provider openidConnect --key "$CLIENT" \
-    --secret "$SECRET" --auto-discover-url "$DISCOVERY" \
-    --scopes openid --scopes profile --scopes email
-elif [ "$#" = 1 ]; then
-  auth update-oauth --id "$1" --name "$NAME" --provider openidConnect --key "$CLIENT" \
-    --secret "$SECRET" --auto-discover-url "$DISCOVERY" \
-    --scopes openid --scopes profile --scopes email
-else
-  printf 'Ambiguous native authentication sources; stop and inspect.\n' >&2
-  exit 1
+CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=configuration --show-only templates/configuration.yaml > "$CONFIGURATION"
+NAME=$(yq -er '.configuration[strenv(INSTANCE)].oidc.name' "$CONFIGURATION")
+CLIENT=$(yq -er '.configuration[strenv(INSTANCE)].oidc.clientId' "$CONFIGURATION")
+DISCOVERY=$(yq -er '.configuration[strenv(INSTANCE)].oidc.discoveryUrl' "$CONFIGURATION")
+NATIVE_VERSION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.spec.version}')
+BIN="/usr/local/lib/forgejo/$NATIVE_VERSION/forgejo"
+POD=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods \
+  -l app.kubernetes.io/name=forgejo,forgejo.bartl.sh/role=app -o json |
+  jq -er '[.items[] | select(.status.phase == "Running")] | if length == 1 then .[0].metadata.name else error("Expected one serving pod") end')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" exec "$POD" -c forgejo -- \
+  "$BIN" --work-path /data --custom-path /data/custom --config /data/app.ini admin auth list
+```
+
+For an absent source with this name, create it once. The retained secret travels through protected stdin, not local command arguments:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NS" exec -i "$POD" -c forgejo -- /bin/sh -c '
+  SECRET=$(cat)
+  exec "$1" --work-path /data --custom-path /data/custom --config /data/app.ini admin auth add-oauth \
+    --name "$2" --provider openidConnect --key "$3" --secret "$SECRET" \
+    --auto-discover-url "$4" --scopes openid --scopes profile --scopes email
+' sh "$BIN" "$NAME" "$CLIENT" "$DISCOVERY" < "$INSTALL_DIR/protected/oidc-client-secret"
+```
+
+For a deliberately approved update to an existing unique source, select its ID from native auth list and update that source instead. Do not run add-oauth again or overwrite restored native account-linking decisions:
+
+```bash
+AUTH_ID=REPLACE_WITH_INSPECTED_SOURCE_ID
+kubectl --context "$KUBE_CONTEXT" -n "$NS" exec -i "$POD" -c forgejo -- /bin/sh -c '
+  SECRET=$(cat)
+  exec "$1" --work-path /data --custom-path /data/custom --config /data/app.ini admin auth update-oauth \
+    --id "$5" --name "$2" --provider openidConnect --key "$3" --secret "$SECRET" \
+    --auto-discover-url "$4" --scopes openid --scopes profile --scopes email
+' sh "$BIN" "$NAME" "$CLIENT" "$DISCOVERY" "$AUTH_ID" < "$INSTALL_DIR/protected/oidc-client-secret"
+```
+
+Native auth records survive capture; independently retain their provider/client. Keep tested local-admin access for identity outages. Verify fresh browser authorization-code login, reviewed MFA/account behavior, logout and another login. Automatic account linking is disabled; unverified matching email is not identity.
+
+## Resume an existing deployment
+
+Restore the verified archive and protected inputs, then select the retained deployment in fresh Bash. This reads configuration and refreshes local declarations only:
+
+```bash
+set -euo pipefail
+umask 077
+export WORK_DIR="$HOME/bartl/acme/acme-installation"
+export VALUES="$WORK_DIR/installation.yaml"
+export DEPLOYMENT=forgejo
+INSTANCE=$(yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
+CLUSTER_ID=$(yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
+NS=$(yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
+RELEASE=$(yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
+PACKAGE=$(yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
+export INSTANCE CLUSTER_ID PACKAGE
+HELM_INSTANCE=${INSTANCE//./\\.}
+KUBE_CONTEXT=$(yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
+export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
+# Replace only with an access file supplied for this selected cluster.
+VERSION=$(yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
+test "$VERSION" = 0.2.2
+CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
+CHART_SHA256=$(yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")
+printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
+INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
+if [ "$DEPLOYMENT" != "$INSTANCE" ]; then INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"; fi
+mkdir -p "$INSTALL_DIR"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
+```
+
+Do not generate identity/bootstrap keys, recreate claims or re-register OIDC to resume. For native auth inspection after resumption, render nonsecret configuration from the same retained chart/intent first; it does not change an authentication source.
+
+## Capture and retry publication
+
+Start from a resumed deployment with backup configured. Complete pending publication with its original state/staging claims and native version before changing those inputs or uninstalling. For a new capture, the writer must still be running; the controller owns drainage, stopped copy, permitted resumption and publication:
+
+```bash
+REQUEST="manual-$(date -u +%Y%m%dT%H%M%SZ)"
+kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
+  "forgejo.bartl.sh/backup-request=$REQUEST" --overwrite
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.backup.request}=$REQUEST" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for=jsonpath='{.status.backup.success}'=true --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/backup-result.json"
+jq -e --arg request "$REQUEST" '.status.backup |
+  .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
+```
+
+Require this request's success and full snapshot identity. BackupFailed retains a complete staging capture and is separate from application health. Correct publication inputs and issue another unique request to retry that capture. Its original capture boundary does not advance; request a subsequent fresh capture for later writes. Never delete staging or change state/staging/version while publication is pending. Failed/ambiguous capture does not authorize restart.
+
+Monitor absent/stale/failed scheduled backups, staging capacity and required secondary protection. The CronJob submits this same request interface. Native locking remains enabled; never blindly unlock. Damaged latest history fails visibly rather than selecting an older point or initializing.
+
+## Stop and start
+
+Ordinary stop is allowed even during pending/failed publication. Export needed diagnostics and persist intent; do not scale generated Deployments:
+
+```bash
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Stopped\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Stopped" and .status == "True" and .observedGeneration == $g)'
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods,jobs,deployments
+```
+
+Require confirmed drainage. Serving can continue through API/controller observation loss; a stop request or unreachable source is not retirement. After a nonfailed stop, start the same retained deployment:
+
+```bash
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+```
+
+Verify useful HTTP/SSH behavior without backup access. Failed transitions remain failed across run intent; never clear markers to restart them.
+
+## Replacement upgrade and promotion
+
+Use this sequence for same-release reconstruction or supported native 16.0.7 → 17.0.1 replacement. Supply the verified package, independent empty state/staging claims, retained native identity, usable repository/reader access, and an authorized final point. Source and target share VALUES and logical instance but have separate deployment intent and storage.
+
+Arrange the interruption/data-loss boundary first. The environment must restrict target **HTTP and SSH** to acceptance operators without alternate-route bypass. No production effects or ordinary writes are allowed during validation. This package has no cross-provider fencing; if predecessor authority cannot be withdrawn, do not promote. DNS changes alone are insufficient.
+
+### Capture final writes before source stop
+
+Resume the reachable source. Withdraw external HTTP/API and **direct SSH** access using the environment's enforced routing/firewall controls, drain existing clients and prevent concurrent operators/scheduled captures. Keep the source writer running so the package can capture it; do not run the stop block first. Disable ingress and automatic capture scheduling, preserving its prior schedule:
+
+```bash
+export SOURCE_DEPLOYMENT="$DEPLOYMENT"
+export SOURCE_DIR="$INSTALL_DIR"
+export SOURCE_HOST="$FORGEJO_HOST"
+BACKUP_SCHEDULE=$(yq -r '.services[strenv(INSTANCE)].backup.schedule // ""' "$VALUES")
+export BACKUP_SCHEDULE
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled = false |
+  .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+REQUEST="manual-$(date -u +%Y%m%dT%H%M%SZ)"
+kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
+  "forgejo.bartl.sh/backup-request=$REQUEST" --overwrite
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.backup.request}=$REQUEST" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for=jsonpath='{.status.backup.success}'=true --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/backup-result.json"
+jq -e --arg request "$REQUEST" '.status.backup |
+  .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
+```
+
+Require success for this final request and any required secondary protection. Finish pending publication using original claims/version; failure postpones planned replacement. Then stop and verify drainage:
+
+```bash
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Stopped\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Stopped" and .status == "True" and .observedGeneration == $g)'
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods,jobs
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pvc -o json > "$SOURCE_DIR/source-pvc.json"
+```
+
+Prevent source restart and direct volume writes. With final publication complete and all writers stopped, finalize the source and remove its routing objects before reusing the hostname/SSH port:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NS" delete forgejoapplication/forgejo --wait=true --timeout=20m
+helm uninstall "$RELEASE" --kube-context "$KUBE_CONTEXT" -n "$NS" --wait --timeout=5m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get ingress,service,pvc,secrets
+```
+
+Claims/Secrets stay retained. Confirm no retired HTTP route or forgejo-ssh Service remains; stopped processes alone do not remove those objects. For an already retired/lost source, skip source API calls, select SOURCE_DEPLOYMENT/SOURCE_DIR and SOURCE_HOST from independently retained configuration/declarations, and read BACKUP_SCHEDULE from its service settings. Independent enforced retirement and usable final history remain prerequisites, not assumptions.
+
+### Prepare the replacement
+
+Choose an unused target deployment, an existing supplied cluster and a fresh namespace. TARGET_VERSION is the genuine choice: retain the source version for same-release recovery or select 17.0.1 for the supported forward transition. Retain a separate package key if adopting another chart; never overwrite the source package selection.
+
+```bash
+export DEPLOYMENT=forgejo-replacement
+export TARGET_CLUSTER=cluster-2
+export TARGET_NAMESPACE=forgejo-green
+export TARGET_VERSION=17.0.1
+export SOURCE_DEPLOYMENT SOURCE_DIR SOURCE_HOST
+INSTANCE=$(yq -er '.deployments[strenv(SOURCE_DEPLOYMENT)].instance' "$VALUES")
+PACKAGE=$(yq -er '.deployments[strenv(SOURCE_DEPLOYMENT)].package' "$VALUES")
+export INSTANCE PACKAGE
+yq -i '.deployments[strenv(DEPLOYMENT)] = {
+  "instance": strenv(INSTANCE), "cluster": strenv(TARGET_CLUSTER),
+  "namespace": strenv(TARGET_NAMESPACE), "release": "forgejo", "package": strenv(PACKAGE)
+} | .operations.deployments[strenv(DEPLOYMENT)] = {
+  "replicas": 1, "ingressEnabled": true, "version": strenv(TARGET_VERSION), "hostname": strenv(SOURCE_HOST)
+} | .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
+INSTANCE=$(yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
+CLUSTER_ID=$(yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
+NS=$(yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
+RELEASE=$(yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
+PACKAGE=$(yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
+export INSTANCE CLUSTER_ID PACKAGE
+HELM_INSTANCE=${INSTANCE//./\\.}
+KUBE_CONTEXT=$(yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
+export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
+# Replace only with an access file supplied for this selected cluster.
+VERSION=$(yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
+test "$VERSION" = 0.2.2
+CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
+CHART_SHA256=$(yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")
+printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
+INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
+if [ "$DEPLOYMENT" != "$INSTANCE" ]; then INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"; fi
+mkdir -p "$INSTALL_DIR"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
+kubectl --context "$KUBE_CONTEXT" create namespace "$NS"
+for role in state staging; do
+  CLAIM=$(ROLE="$role" yq -er '.storage.claims[strenv(INSTANCE)][strenv(ROLE)].claimName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: $CLAIM
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+EOF
+done
+cp -R "$SOURCE_DIR/protected" "$INSTALL_DIR/protected"
+```
+
+Restore the original native identity, not fresh keys or source-mounted state. For secondary recovery, select its surviving repository URL and supply that repository's own reader/writer files under target repository/; use its destination snapshot identity, not assumed primary IDs. Preserve any composed binding form instead of introducing a conflicting direct URL. Native auth records come from capture; retain the matching provider/client independently.
+
+Refresh declarations and native configuration after the selected repository/endpoint choices:
+
+```bash
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+for pair in reader:backupReader writer:backupWriter; do
+  directory=${pair%%:*}; role=${pair#*:}
+  name=$(ROLE="$role" yq -er '.credentials.bindings[strenv(INSTANCE)][strenv(ROLE)].secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$name" \
+    --from-file="$INSTALL_DIR/repository/$directory/"
+done
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=configuration --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
+CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
+yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DIR/protected/app.ini"
+{
+  printf '\n[security]\nSECRET_KEY = %s\nINTERNAL_TOKEN = %s\n' \
+    "$(cat "$INSTALL_DIR/protected/identity/SECRET_KEY")" "$(cat "$INSTALL_DIR/protected/identity/INTERNAL_TOKEN")"
+  printf '\n[server]\nLFS_JWT_SECRET = %s\n' "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
+} >> "$INSTALL_DIR/protected/app.ini"
+CONFIG_SECRET=$(yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
+  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
+  kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
+```
+
+For external TLS only, supply the target certificate/key and retain external ownership:
+
+```bash
+TLS_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret tls "$TLS_SECRET" \
+  --cert="$INSTALL_DIR/tls/fullchain.pem" --key="$INSTALL_DIR/tls/key.pem"
+```
+
+Source retirement and target HTTP/SSH acceptance restrictions must now be enforced. Point the authorized hostnames to the target ingress/SSH route and confirm authoritative/public answers before managed certificates:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n kube-system get service traefik -o wide
+printf 'HTTPS: %s; SSH: %s:%s\n' "$FORGEJO_HOST" "$SSH_HOST" "$SSH_PORT"
+dig "$FORGEJO_HOST" A +trace
+dig @1.1.1.1 +short "$FORGEJO_HOST" A
+dig @8.8.8.8 +short "$FORGEJO_HOST" A
+```
+
+### Reconstruct and accept
+
+```bash
+helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+if yq -e '.services[strenv(INSTANCE)].endpoints.https.tlsManaged' "$CONNECTIONS" >/dev/null; then
+  TLS_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
 fi
-SCRIPT
-  } | kubectl --context "$KUBE_CONTEXT" -n "$NS" exec -i "$POD" -c forgejo -- /bin/sh -s
-)
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/recovery-result.json"
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods,jobs,service
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pvc -o json > "$INSTALL_DIR/target-pvc.json"
+curl --fail --silent --show-error --output /dev/null "$FORGEJO_URL"
 ```
 
-Replay updates the same named source using the same retained credentials, not a new secret or duplicate source. Capture retains native auth records; independently retain the provider realm/client and credentials. The package permits OIDC registration but disables automatic account linking; do not link by unverified email. Keep tested local administrator access as the recovery path while identity is unavailable. Verify real browser authorization-code login, reviewed MFA/account behavior, logout and new login through the declared HTTPS endpoint.
+Inspect native preparation logs, selected repository/snapshot and operation result. Require the authorized final point, intended native version and independent PVC UIDs/backing volumes. Native preparation restores the captured version, flushes native queue state and performs the supported forward migration. An empty initialization is not recovery of expected history; lookup/integrity failure does not permit it.
 
-## Handover
+Through restricted real HTTP/SSH, verify clone/push, LFS, issues/PRs, attachment/package/release bytes, grants and SSH host identity. Check ordinary sources are denied. Verify fresh OIDC login if used without rewriting restored auth sources. Produce new synthetic work and another usable recovery point:
 
-Hand over the exact chart/image identities, effective values and native configuration, application identity, owned-volume inventory, backup repository/history and keys, reader/writer/maintenance roles, endpoint/TLS/SSH routing and host-key records, Keycloak dependencies, monitoring/retention responsibilities and the procedure above. A successor needs the same operational ability, not this development lab. Recovery keys must be usable without the lost cluster or its Keycloak.
-
-## Build and publication identity
-
-Never build on the workstation. On the authorized Hetzner Linux amd64 builder, with sufficient retained artifact capacity:
-
-```sh
-BARTL_FORGEJO_LAB=hetzner OUT=/srv/retained/forgejo-candidate ./build.sh
+```bash
+REQUEST="manual-$(date -u +%Y%m%dT%H%M%SZ)"
+kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
+  "forgejo.bartl.sh/backup-request=$REQUEST" --overwrite
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.backup.request}=$REQUEST" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for=jsonpath='{.status.backup.success}'=true --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/backup-result.json"
+jq -e --arg request "$REQUEST" '.status.backup |
+  .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
 
-The procedure takes an immutable source snapshot through a temporary Git index without changing the user's index or requiring an unverified implementation commit. It builds once from that exact snapshot and retains an OCI directory, digest-pinned chart, source archive/SHA256, source tree identity, base commit, image reference and checksums. A snapshot tree is not claimed as a verified source commit. An existing output directory is refused. Preserve these artifacts and qualification results independently before deleting the builder. Restic 0.19.1 Linux amd64 compressed binary SHA256 is `f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c`.
+After acceptance, restore the approved capture schedule and remove environment restrictions to activate production HTTP and SSH:
 
-### Maintainer package qualification
-
-Run setup and proof from the source checkout on an authorized, budgeted Hetzner Linux amd64 host, never on the workstation. Setup requires a fresh disposable K3s cluster with Traefik, cert-manager and default filesystem storage, an administrative `KUBECONFIG`, Node.js 22 or later, Helm supporting `--wait=legacy`, kubectl, Mike Farah yq v4, OpenSSL and dig. Proof also needs Git with Git LFS, OpenSSH client tools and sha256sum. Supply three distinct public DNS names delegated to deSEC, resolving only to the lab IPv4 (no AAAA). Setup checks authoritative/public resolvers; package charts use cert-manager for public certificates without stopping K3s. Permit ACME HTTP, HTTPS, SSH NodePorts and pod access to the host proof proxy. Setup checksums published Keycloak 0.6.1 and Restic 0.3.0 archives, renders Forgejo native configuration from the retained candidate chart, and refuses existing qualification directories/namespaces. It prepares a new single-cluster lab, not an existing customer installation.
-
-Set the installation-specific DNS, address and kubeconfig inputs in the remote shell; the paths below are absolute remote paths, not workstation paths:
-
-```sh
-export BARTL_FORGEJO_LAB=hetzner BARTL_FORGEJO_DISPOSABLE_CLUSTER=yes
-export KUBECONFIG=/home/runner/.kube/config
-export BARTL_FORGEJO_HOST=forgejo.lab.example.org
-export BARTL_FORGEJO_TARGET_HOST=forgejo-target.lab.example.org
-export BARTL_KEYCLOAK_HOST=keycloak.lab.example.org
-export BARTL_LAB_IPV4=REPLACE_WITH_LAB_PUBLIC_IPV4
-export LAB_QUALIFICATION_DIR=/home/runner/qualification
-export BARTL_FORGEJO_CHART=/srv/retained/forgejo-candidate/bartl-forgejo-0.2.2.tgz
-bash tests/setup-lab.sh
-export NODE_EXTRA_CA_CERTS="$LAB_QUALIFICATION_DIR/proxy.crt"
-node tests/package-proof.mjs \
-  --lab "$LAB_QUALIFICATION_DIR/lab.json" \
-  --chart "$BARTL_FORGEJO_CHART" \
-  --artifacts /srv/retained/forgejo-candidate \
-  --work /home/runner/package-proof
+```bash
+yq -i '.services[strenv(INSTANCE)].backup.schedule = strenv(BACKUP_SCHEDULE)' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
 ```
 
-The proof consumes the retained build output, not a rebuilt image, and requires a new work directory without whitespace. Keep `lab.json`, generated credentials and raw evidence protected; retain the artifact identities and results independently before deleting the host. These scripts prepare and exercise a disposable lab; they are not the customer installation or recovery interface.
+Record active deployment, accepted final-write boundary, selected point, observed recovery time and results in existing operating records. Keep source stopped/retained until disposition is authorized. If target writes occurred, never automatically reactivate the predecessor; establish authoritative state and reconcile explicitly. Failed/ambiguous mutation remains stopped: retain diagnostics and reconstruct on another independent empty target, not by deleting markers.
 
-For an independently prepared multi-cluster lab, `lab.json` may set `backup.kubeconfig` to an absolute protected kubeconfig path usable by the proof executor; only backup endpoint port-forwarding uses it. Application operations retain the executor's normal kubeconfig. The backup API must be reachable from that executor. Preserve all behavioral acceptance inputs and source-stop checks when supplying such a lab; the setup helper itself remains fresh single-cluster preparation.
+An earlier isolated rehearsal may use a deployment-local candidate hostname and restricted real HTTP/SSH, but must not publish competing history or cause production effects. It does not include later source writes. After the final source capture, reconstruct a fresh target through this sequence; do not silently promote the earlier rehearsal.
 
-After separate publication authorization and successful exact-candidate qualification, publish these same bytes without rebuilding:
+## Change the selected endpoint
 
-```sh
-skopeo copy --preserve-digests oci:/srv/retained/forgejo-candidate/image:candidate \
-  docker://ghcr.io/bartlapp/bartl-forgejo-controller:QUALIFIED_PACKAGE_TAG
-helm push /srv/retained/forgejo-candidate/bartl-forgejo-0.2.2.tgz oci://ghcr.io/bartlapp
+Starting condition: resumed deployment, approved endpoint change, current publication complete and access restricted during the change. Set the one new hostname; retain existing identity. Update any separately overridden ssh.hostname and native provider callbacks deliberately. If removing an override, delete that field to restore package derivation rather than recording the derived hostname as a permanent choice.
+
+```bash
+export NEW_HOST=forgejo.acme.fke.systems
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].hostname = strenv(NEW_HOST)' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  --set-string renderMode=configuration --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
+CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
+yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DIR/protected/app.ini"
+{
+  printf '\n[security]\nSECRET_KEY = %s\nINTERNAL_TOKEN = %s\n' \
+    "$(cat "$INSTALL_DIR/protected/identity/SECRET_KEY")" "$(cat "$INSTALL_DIR/protected/identity/INTERNAL_TOKEN")"
+  printf '\n[server]\nLFS_JWT_SECRET = %s\n' "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
+} >> "$INSTALL_DIR/protected/app.ini"
+CONFIG_SECRET=$(yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
+kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
+  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
+  kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+if yq -e '.services[strenv(INSTANCE)].endpoints.https.tlsManaged' "$CONNECTIONS" >/dev/null; then
+  TLS_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].tls.secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" wait "certificate/$TLS_SECRET" --for=condition=Ready --timeout=10m
+fi
 ```
 
-Verify the registry digest against `image.digest` and retain the chart checksum, source archive/tree identity and qualification identity with the release. The chart continues to select the digest, never the mutable publication tag. Publishing is not part of `build.sh`.
+Prepare authorized DNS and a matching external certificate, if used, before this command sequence; managed issuance needs public port 80. Verify real HTTPS/SSH and LFS at the newly advertised endpoint, update approved OIDC callbacks, then reopen access. Never use URL rewriting as LFS acceptance.
 
-Authored package code is Apache-2.0. Forgejo is GPL-3.0-or-later; upstream notices, licenses and corresponding source remain separate and are retained in the combined image. See [NOTICE](NOTICE) and [LICENSE](LICENSE).
+## Removal and retained-state reinstall
+
+Starting condition: resumed deployment and completed publication. If publication is pending/failed, retry its retained capture through the capture interface while keeping controller, CR, original state/staging claims and native version; failed publication postpones planned uninstall, not ordinary stop. Do not change those inputs to escape the pending operation.
+
+Persist stop, wait for the current generation and inspect drainage:
+
+```bash
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Stopped\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Stopped" and .status == "True" and .observedGeneration == $g)'
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods,jobs
+```
+
+With publication complete, no executing writers/native Jobs and removal authorized, finalize while the controller is alive:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NS" delete forgejoapplication/forgejo --wait=true --timeout=20m
+helm uninstall "$RELEASE" --kube-context "$KUBE_CONTEXT" -n "$NS" --wait --timeout=5m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get pvc,secrets,ingress,service
+```
+
+Never uninstall first, bypass finalizers or issue a Helm upgrade between CR deletion and uninstall. Claims, supplied Secrets and shared CRD remain. Namespace/PVC destruction requires separate data-disposition authorization; infrastructure and owned DNS cleanup remain separate.
+
+For authorized reinstall after successful finalization, use the same identity, claims, configuration and supplied Secrets with no competing predecessor or failed marker. **Reset retained stop intent** before installing; do not recreate storage or credentials:
+
+```bash
+yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
+REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
+INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
+NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
+TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
+HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
+if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
+if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
+helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
+  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
+  jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+    any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+```
+
+Verify retained native identity/content, new work and another usable backup. Uninstall cannot repair a failed transition or preserve pending publication automatically.
+
+## Handover and reference
+
+Hand over exact artifacts, effective installation/native configuration, native identity, volume inventory, protected keys, repository history, reader/writer/admin role boundaries, HTTPS/SSH routing/host-key records, identity dependencies, monitoring/retention responsibility and these procedures. Recovery inputs must be usable without the lost cluster or its Keycloak.
+
+The chart's [interface schema](chart/interface.schema.json) and [defaults](chart/defaults.yaml) define service choices. Omitted fields derive/default, maps merge, lists replace and false/zero remain effective. Unknown selected-service fields fail; unrelated installation content is ignored. Public connections expose HTTPS/SSH endpoints, OIDC/backup requests, credential requirements/bindings and state/staging claims. Configuration output provides native app.ini and optional OAuth arguments; protected identity remains external. Refresh calculated resolved bindings after provider choices change.
+
+[Maintainer procedures and historical evidence](AGENTS.md#historical-evidence) retain exact runtime qualification and build/publication instructions. Historical application reconstruction on one node does not qualify this rewritten sequence, provider-loss activation or production-scale interruption limits.
+
+Authored code is Apache-2.0. Forgejo is GPL-3.0-or-later; upstream notices/licenses and corresponding source are retained separately in the combined image. See [NOTICE](NOTICE) and [LICENSE](LICENSE).
