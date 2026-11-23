@@ -808,7 +808,11 @@ jq -e --arg request "$REQUEST" '.status.backup |
   .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
 
-After acceptance, restore the approved capture schedule and remove environment restrictions to activate production HTTP and SSH:
+The replacement is now accepted under restricted HTTP/SSH access, with a successful subsequent backup. In a composed installation, pause here until cross-service acceptance is complete; keep the source retired and target access restricted.
+
+### Activate the replacement
+
+After standalone acceptance or the coordinator's activation decision, restore the approved capture schedule and remove environment restrictions to activate production HTTP and SSH:
 
 ```bash
 yq -i '.services[strenv(INSTANCE)].backup.schedule = strenv(BACKUP_SCHEDULE)' "$VALUES"
