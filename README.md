@@ -4,72 +4,82 @@ Native Forgejo with SQLite/filesystem state, HTTPS/SSH access, stopped capture a
 
 New deployment: follow the recipe below. Existing deployment: [resume access](#resume-an-existing-deployment), then choose an operation. Use workstation Bash, keep tracing off and stop at a failed command. Creation is not a replay or repair program.
 
+- [Install](#supported-profile-and-release) and [resume](#resume-an-existing-deployment)
+- [Capture](#capture-and-retry-publication) and [stop/start](#stop-and-start)
+- [Replace or upgrade](#replacement-upgrade-and-promotion), [change endpoints](#change-the-selected-endpoint) and [remove/reinstall](#removal-and-retained-state-reinstall)
+
 ## Supported profile and release
 
 Published **0.2.2** supports Linux amd64, Kubernetes 1.30+, one application replica and native Forgejo 16.0.7 or 17.0.1. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
 
 Supply the [operator tools](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#check-the-workstation), an existing version-1 installation record with complete cluster/resource references and retained access, enforced NetworkPolicy, Traefik, cert-manager and state/staging/reconstruction capacity. [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md) supplies a single-node profile; an equivalent cluster suffices. Compatible external OIDC/Restic services work without another Bartl package or company tooling.
 
-Select the existing installation directory. Acquire the archive or restore its independently retained bytes to the same path:
+Use direnv-hooked Bash. [Refresh an older Base context](https://github.com/bartlapp/base-k3s/blob/main/README.md#refresh-an-existing-installations-context) before adopting deployment selectors. Equivalent external clusters use [supplied cluster access](https://github.com/bartlapp/base-k3s/blob/main/README.md#use-supplied-cluster-access), without Hetzner machine fields.
+
+```bash
+cd "${WORK_DIR_ROOT:-$HOME/bartl}/acme/acme-installation/clusters/cluster-1"
+```
+
+At the next prompt, obtain the latest stable chart. Package version and native Forgejo version remain separate selections:
 
 ```bash
 set -euo pipefail
 umask 077
-export WORK_DIR="$HOME/bartl/acme/acme-installation"
-export VALUES="$WORK_DIR/installation.yaml"
+kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
 mkdir -p "$WORK_DIR/packages"
-helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.2.2 --destination "$WORK_DIR/packages"
-CHART="$WORK_DIR/packages/bartl-forgejo-0.2.2.tgz"
-CHART_SHA256=16405a6d485138d16ebe4afca0c7a3d9a68705194a39ed430311ea16d9bf0664
-printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
+CHART_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
+helm pull oci://ghcr.io/bartlapp/bartl-forgejo --untar --untardir "$CHART_STAGE"
+export PACKAGE_VERSION
+PACKAGE_VERSION=$(helm show chart "$CHART_STAGE/bartl-forgejo" | yq -er '.version')
 ```
 
 The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact artifacts and exercised behavior; this rewritten sequence is not renewed live qualification. The source-only backup-declaration eligibility correction is unreleased and requires a new chart version. These commands use explicit backup selection and do not depend on it. Old flat values are not accepted by 0.2.2.
 
-Retain chart/image, configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
+The registry supplies immutable charts and images; local caches are disposable. Retain configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
 
 ## Configure a new deployment
 
 Choose unused deployment, service and package keys and a fresh namespace. These assignments preserve unrelated installation entries. Use the replacement sequence for another deployment of the same logical instance.
 
 ```bash
+{
 export DEPLOYMENT=forgejo
 export INSTANCE=forgejo
-export CLUSTER_ID=cluster-1
 export NS=forgejo-blue
 export RELEASE=forgejo
 export PACKAGE=forgejo
-export CHART_SHA256
 yq -i '.deployments[strenv(DEPLOYMENT)] = {
   "instance": strenv(INSTANCE), "cluster": strenv(CLUSTER_ID),
   "namespace": strenv(NS), "release": strenv(RELEASE), "package": strenv(PACKAGE)
 } | .services[strenv(INSTANCE)] = {"bootstrapSecret": "forgejo-bootstrap"} |
   .packages[strenv(PACKAGE)] = {
-    "version": "0.2.2", "chart": "oci://ghcr.io/bartlapp/bartl-forgejo", "chartSha256": strenv(CHART_SHA256)
+    "version": strenv(PACKAGE_VERSION), "chart": "oci://ghcr.io/bartlapp/bartl-forgejo"
   }' "$VALUES"
+DEPLOYMENT_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
+CLUSTER_ENV=../../.envrc
+if [ "$DEPLOYMENT" != "$INSTANCE" ]; then
+  DEPLOYMENT_DIR="$DEPLOYMENT_DIR/deployments/$DEPLOYMENT"
+  CLUSTER_ENV=../../../../.envrc
+fi
+mkdir -p "$DEPLOYMENT_DIR" "$WORK_DIR/packages/$PACKAGE"
+(
+  set -o noclobber
+  printf 'source_env %s\nload_deployment "%s"\n' "$CLUSTER_ENV" "$DEPLOYMENT" > "$DEPLOYMENT_DIR/.envrc"
+)
+if [ ! -d "$WORK_DIR/packages/$PACKAGE/$PACKAGE_VERSION" ]; then
+  mv "$CHART_STAGE/bartl-forgejo" "$WORK_DIR/packages/$PACKAGE/$PACKAGE_VERSION"
+fi
+rm -r "$CHART_STAGE"
+direnv allow "$DEPLOYMENT_DIR"
+cd "$DEPLOYMENT_DIR"
+}
 ```
 
-The service defaults to native 17.0.1 and a hostname derived from dns.root. Set optional hostname, claim, SSH/TLS or dependency choices before rendering. Read the selected access and declare connections:
+Wait for the next prompt: the selector loads the recorded deployment and chart path. The service defaults to native 17.0.1 and a hostname derived from `dns.root`. Set optional hostname, native version, claim, SSH/TLS or dependency choices before rendering:
 
 ```bash
-INSTANCE=$(yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
-CLUSTER_ID=$(yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
-NS=$(yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
-RELEASE=$(yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
-PACKAGE=$(yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-export INSTANCE CLUSTER_ID PACKAGE
+VERSION="$PACKAGE_VERSION"
 HELM_INSTANCE=${INSTANCE//./\\.}
-KUBE_CONTEXT=$(yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
-export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
-# Replace only with an access file supplied for this selected cluster.
-VERSION=$(yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
-test "$VERSION" = 0.2.2
-CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
-CHART_SHA256=$(yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")
-printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
-INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
-if [ "$DEPLOYMENT" != "$INSTANCE" ]; then INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"; fi
-mkdir -p "$INSTALL_DIR"
 REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
 INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
 NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
@@ -189,7 +199,7 @@ Omission means no backup; explicit backup.enabled: false disables it. Schedule i
 
 ## Optional composition with Keycloak and Restic
 
-First operate the selected providers through their own release READMEs. Do not create their deployments, credentials or storage here. Historical composition used Keycloak 0.6.1 and Restic 0.3.0; the current Keycloak candidate has a different deployment interface. Consume current declaration files from those procedures, not guessed endpoints or provider CRs.
+First operate the selected providers through their own release READMEs. Do not create their deployments, credentials or storage here. Published Keycloak 0.7.0 and Restic 0.3.0 supply declaration files consumed below; their standalone evidence does not qualify this composition. Consume current declarations, not guessed endpoints or provider CRs.
 
 For **Keycloak instead of direct oidc.issuer**, select its retained deployment and declaration file:
 
@@ -365,6 +375,8 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET
 
 Rendering starts from the chart template, not an old app.ini. It supplies native paths, URLs/ports and disabled-effect settings. Retain configuration/identity independently before installation. Backup captures native state and identity/version/integrity metadata; target configuration, TLS and repository credentials remain separate recovery inputs.
 
+Retain `protected/identity/` and `repository/{reader,writer}` with the logical instance across replacements. Bootstrap credentials are for first initialization, not resetting restored users. Retain the OIDC client secret and provider binding independently; Keycloak administrator credentials are preparation-only. `protected/app.ini` is regenerated from retained configuration and identity. Externally supplied `tls/` files belong to the target deployment. Keep all plaintext inputs outside Git.
+
 ## Install and observe
 
 ```bash
@@ -444,32 +456,28 @@ Native auth records survive capture; independently retain their provider/client.
 
 ## Resume an existing deployment
 
-Restore the verified archive and protected inputs, then select the retained deployment in fresh Bash. This reads configuration and refreshes local declarations only:
+### Load retained context
+
+In direnv-hooked Bash, enter the actual deployment directory; a replacement uses its nested `deployments/<deployment>` directory. For an older deployment without a selector, use Base's [one-time adoption procedure](https://github.com/bartlapp/base-k3s/blob/main/README.md#refresh-an-existing-installations-context).
+
+```bash
+cd "${WORK_DIR_ROOT:-$HOME/bartl}/acme/acme-installation/clusters/cluster-1/applications/forgejo"
+```
+
+At the next prompt, reacquire the recorded chart when absent and refresh declaration/operation inputs. Restore protected inputs independently; context loading does not require a running application:
 
 ```bash
 set -euo pipefail
 umask 077
-export WORK_DIR="$HOME/bartl/acme/acme-installation"
-export VALUES="$WORK_DIR/installation.yaml"
-export DEPLOYMENT=forgejo
-INSTANCE=$(yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
-CLUSTER_ID=$(yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
-NS=$(yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
-RELEASE=$(yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
-PACKAGE=$(yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-export INSTANCE CLUSTER_ID PACKAGE
+if [ ! -d "$CHART" ]; then
+  mkdir -p "$WORK_DIR/packages/$PACKAGE"
+  CHART_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
+  helm pull "$CHART_REF" --version "$PACKAGE_VERSION" --untar --untardir "$CHART_STAGE"
+  mv "$CHART_STAGE/bartl-forgejo" "$CHART"
+  rm -r "$CHART_STAGE"
+fi
+VERSION="$PACKAGE_VERSION"
 HELM_INSTANCE=${INSTANCE//./\\.}
-KUBE_CONTEXT=$(yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
-export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
-# Replace only with an access file supplied for this selected cluster.
-VERSION=$(yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
-test "$VERSION" = 0.2.2
-CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
-CHART_SHA256=$(yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")
-printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
-INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
-if [ "$DEPLOYMENT" != "$INSTANCE" ]; then INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"; fi
-mkdir -p "$INSTALL_DIR"
 REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
 INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
 NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
@@ -485,10 +493,17 @@ FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECT
 FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
 SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
 SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
 ```
 
 Do not generate identity/bootstrap keys, recreate claims or re-register OIDC to resume. For native auth inspection after resumption, render nonsecret configuration from the same retained chart/intent first; it does not change an authentication source.
+
+### Inspect an installed deployment
+
+For an application expected to exist, inspect it after loading context. Skip this inspection for retained-state reinstall after deliberate removal:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
+```
 
 ## Capture and retry publication
 
@@ -568,6 +583,17 @@ Use this sequence for same-release reconstruction or supported native 16.0.7 →
 
 Arrange the interruption/data-loss boundary first. The environment must restrict target **HTTP and SSH** to acceptance operators without alternate-route bypass. No production effects or ordinary writes are allowed during validation. This package has no cross-provider fencing; if predecessor authority cannot be withdrawn, do not promote. DNS changes alone are insufficient.
 
+Before interrupting the source, obtain the replacement's latest stable chart under a new package key. This does not change the source's package or native version:
+
+```bash
+export TARGET_PACKAGE=forgejo-replacement
+mkdir -p "$WORK_DIR/packages"
+TARGET_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
+helm pull oci://ghcr.io/bartlapp/bartl-forgejo --untar --untardir "$TARGET_STAGE"
+export TARGET_PACKAGE_VERSION
+TARGET_PACKAGE_VERSION=$(helm show chart "$TARGET_STAGE/bartl-forgejo" | yq -er '.version')
+```
+
 ### Capture final writes before source stop
 
 Resume the reachable source. Withdraw external HTTP/API and **direct SSH** access using the environment's enforced routing/firewall controls, drain existing clients and prevent concurrent operators/scheduled captures. Keep the source writer running so the package can capture it; do not run the stop block first. Disable ingress and automatic capture scheduling, preserving its prior schedule:
@@ -576,7 +602,11 @@ Resume the reachable source. Withdraw external HTTP/API and **direct SSH** acces
 export SOURCE_DEPLOYMENT="$DEPLOYMENT"
 export SOURCE_DIR="$INSTALL_DIR"
 export SOURCE_HOST="$FORGEJO_HOST"
-BACKUP_SCHEDULE=$(yq -r '.services[strenv(INSTANCE)].backup.schedule // ""' "$VALUES")
+if [ ! -e "$SOURCE_DIR/backup-schedule-before-operation" ]; then
+  (set -o noclobber; yq -r '.services[strenv(INSTANCE)].backup.schedule // ""' "$VALUES" \
+    > "$SOURCE_DIR/backup-schedule-before-operation")
+fi
+BACKUP_SCHEDULE=$(cat "$SOURCE_DIR/backup-schedule-before-operation")
 export BACKUP_SCHEDULE
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled = false |
   .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
@@ -597,6 +627,11 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
     any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
+```
+
+Let admitted work finish. If publication is pending or failed, complete it through [Capture and retry publication](#capture-and-retry-publication) with the original claims/version while intake remains closed. That publishes the retained capture, not later writes. Only after pending publication is complete, request a fresh final capture:
+
+```bash
 REQUEST="manual-$(date -u +%Y%m%dT%H%M%SZ)"
 kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
   "forgejo.bartl.sh/backup-request=$REQUEST" --overwrite
@@ -609,7 +644,7 @@ jq -e --arg request "$REQUEST" '.status.backup |
   .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
 
-Require success for this final request and any required secondary protection. Finish pending publication using original claims/version; failure postpones planned replacement. Then stop and verify drainage:
+Require successful publication of this fresh final capture, inclusion of the final writes and any required secondary protection. Failure postpones planned replacement; retry a failed publication with the original claims/version before proceeding. Then stop and verify drainage:
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
@@ -642,45 +677,49 @@ helm uninstall "$RELEASE" --kube-context "$KUBE_CONTEXT" -n "$NS" --wait --timeo
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get ingress,service,pvc,secrets
 ```
 
-Claims/Secrets stay retained. Confirm no retired HTTP route or forgejo-ssh Service remains; stopped processes alone do not remove those objects. For an already retired/lost source, skip source API calls, select SOURCE_DEPLOYMENT/SOURCE_DIR and SOURCE_HOST from independently retained configuration/declarations, and read BACKUP_SCHEDULE from its service settings. Independent enforced retirement and usable final history remain prerequisites, not assumptions.
+Claims/Secrets stay retained. Confirm no retired HTTP route or `forgejo-ssh` Service remains; stopped processes alone do not remove those objects. For an already retired/lost source, skip source API calls and select `SOURCE_DEPLOYMENT`, `SOURCE_DIR` and `SOURCE_HOST` from independently retained configuration/declarations. Save the original backup schedule in `"$SOURCE_DIR/backup-schedule-before-operation"` using the save-if-absent block above before target preparation clears it. Preserve an existing operation's file across retries and shell changes. Independent enforced retirement and usable final history remain prerequisites.
 
 ### Prepare the replacement
 
 Choose an unused target deployment, an existing supplied cluster and a fresh namespace. TARGET_VERSION is the genuine choice: retain the source version for same-release recovery or select 17.0.1 for the supported forward transition. Retain a separate package key if adopting another chart; never overwrite the source package selection.
 
 ```bash
+{
 export DEPLOYMENT=forgejo-replacement
 export TARGET_CLUSTER=cluster-2
 export TARGET_NAMESPACE=forgejo-green
 export TARGET_VERSION=17.0.1
 export SOURCE_DEPLOYMENT SOURCE_DIR SOURCE_HOST
 INSTANCE=$(yq -er '.deployments[strenv(SOURCE_DEPLOYMENT)].instance' "$VALUES")
-PACKAGE=$(yq -er '.deployments[strenv(SOURCE_DEPLOYMENT)].package' "$VALUES")
-export INSTANCE PACKAGE
+export INSTANCE
 yq -i '.deployments[strenv(DEPLOYMENT)] = {
   "instance": strenv(INSTANCE), "cluster": strenv(TARGET_CLUSTER),
-  "namespace": strenv(TARGET_NAMESPACE), "release": "forgejo", "package": strenv(PACKAGE)
+  "namespace": strenv(TARGET_NAMESPACE), "release": "forgejo", "package": strenv(TARGET_PACKAGE)
+} | .packages[strenv(TARGET_PACKAGE)] = {
+  "version": strenv(TARGET_PACKAGE_VERSION), "chart": "oci://ghcr.io/bartlapp/bartl-forgejo"
 } | .operations.deployments[strenv(DEPLOYMENT)] = {
   "replicas": 1, "ingressEnabled": true, "version": strenv(TARGET_VERSION), "hostname": strenv(SOURCE_HOST)
 } | .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
-INSTANCE=$(yq -er '.deployments[strenv(DEPLOYMENT)].instance' "$VALUES")
-CLUSTER_ID=$(yq -er '.deployments[strenv(DEPLOYMENT)].cluster' "$VALUES")
-NS=$(yq -er '.deployments[strenv(DEPLOYMENT)].namespace' "$VALUES")
-RELEASE=$(yq -er '.deployments[strenv(DEPLOYMENT)].release' "$VALUES")
-PACKAGE=$(yq -er '.deployments[strenv(DEPLOYMENT)].package' "$VALUES")
-export INSTANCE CLUSTER_ID PACKAGE
+TARGET_DIR="$WORK_DIR/clusters/$TARGET_CLUSTER/applications/$INSTANCE/deployments/$DEPLOYMENT"
+mkdir -p "$TARGET_DIR" "$WORK_DIR/packages/$TARGET_PACKAGE"
+(
+  set -o noclobber
+  printf 'source_env ../../../../.envrc\nload_deployment "%s"\n' "$DEPLOYMENT" > "$TARGET_DIR/.envrc"
+)
+if [ ! -d "$WORK_DIR/packages/$TARGET_PACKAGE/$TARGET_PACKAGE_VERSION" ]; then
+  mv "$TARGET_STAGE/bartl-forgejo" "$WORK_DIR/packages/$TARGET_PACKAGE/$TARGET_PACKAGE_VERSION"
+fi
+rm -r "$TARGET_STAGE"
+direnv allow "$TARGET_DIR"
+cd "$TARGET_DIR"
+}
+```
+
+Wait for the next prompt. Keep the source-input directory and saved backup schedule available until activation succeeds. Load this target's explicit native-version and hostname intent; do not reuse the source's `HELM_INTENT` array:
+
+```bash
+VERSION="$PACKAGE_VERSION"
 HELM_INSTANCE=${INSTANCE//./\\.}
-KUBE_CONTEXT=$(yq -er '.clusters[strenv(CLUSTER_ID)].kubeconfig.context' "$VALUES")
-export KUBECONFIG="$WORK_DIR/clusters/$CLUSTER_ID/base/kubeconfig"
-# Replace only with an access file supplied for this selected cluster.
-VERSION=$(yq -er '.packages[strenv(PACKAGE)].version' "$VALUES")
-test "$VERSION" = 0.2.2
-CHART="$WORK_DIR/packages/bartl-forgejo-$VERSION.tgz"
-CHART_SHA256=$(yq -er '.packages[strenv(PACKAGE)].chartSha256' "$VALUES")
-printf '%s  %s\n' "$CHART_SHA256" "$CHART" | shasum -a 256 --check -
-INSTALL_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
-if [ "$DEPLOYMENT" != "$INSTANCE" ]; then INSTALL_DIR="$INSTALL_DIR/deployments/$DEPLOYMENT"; fi
-mkdir -p "$INSTALL_DIR"
 REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
 INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
 NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
@@ -815,6 +854,8 @@ The replacement is now accepted under restricted HTTP/SSH access, with a success
 After standalone acceptance or the coordinator's activation decision, restore the approved capture schedule and remove environment restrictions to activate production HTTP and SSH:
 
 ```bash
+BACKUP_SCHEDULE=$(cat "$SOURCE_DIR/backup-schedule-before-operation")
+export BACKUP_SCHEDULE
 yq -i '.services[strenv(INSTANCE)].backup.schedule = strenv(BACKUP_SCHEDULE)' "$VALUES"
 REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
 INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
@@ -835,7 +876,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jso
     any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
 ```
 
-Record active deployment, accepted final-write boundary, selected point, observed recovery time and results in existing operating records. Keep source stopped/retained until disposition is authorized. If target writes occurred, never automatically reactivate the predecessor; establish authoritative state and reconcile explicitly. Failed/ambiguous mutation remains stopped: retain diagnostics and reconstruct on another independent empty target, not by deleting markers.
+Verify ordinary HTTP/SSH access and the restored schedule, then remove `"$SOURCE_DIR/backup-schedule-before-operation"`. In another shell, select the same source-input directory before activation; never restore the temporarily empty schedule as the original. Keep active deployment, accepted final-write boundary and selected recovery point in the installation record, not a success diary. Keep source stopped/retained until disposition is authorized. If target writes occurred, never automatically reactivate the predecessor; establish authoritative state and reconcile explicitly. Failed/ambiguous mutation remains stopped: retain diagnostics and reconstruct on another independent empty target, not by deleting markers.
 
 An earlier isolated rehearsal may use a deployment-local candidate hostname and restricted real HTTP/SSH, but must not publish competing history or cause production effects. It does not include later source writes. After the final source capture, reconstruct a fresh target through this sequence; do not silently promote the earlier rehearsal.
 
@@ -931,7 +972,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get pvc,secrets,ingress,service
 
 Never uninstall first, bypass finalizers or issue a Helm upgrade between CR deletion and uninstall. Claims, supplied Secrets and shared CRD remain. Namespace/PVC destruction requires separate data-disposition authorization; infrastructure and owned DNS cleanup remain separate.
 
-For authorized reinstall after successful finalization, use the same identity, claims, configuration and supplied Secrets with no competing predecessor or failed marker. **Reset retained stop intent** before installing; do not recreate storage or credentials:
+For authorized reinstall after successful finalization, use the same identity, claims, configuration and supplied Secrets with no competing predecessor or failed marker. In a fresh shell first [load retained context](#load-retained-context), skipping inspection of the deliberately removed application. **Reset retained stop intent** before installing; do not recreate storage or credentials:
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
