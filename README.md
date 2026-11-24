@@ -516,11 +516,12 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
   --for="jsonpath={.status.backup.request}=$REQUEST" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for=jsonpath='{.status.backup.success}'=true --timeout=30m
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/backup-result.json"
+  --for=jsonpath='{.status.backup.success}'=true --timeout=30m -o json > "$INSTALL_DIR/backup-result.json"
 jq -e --arg request "$REQUEST" '.status.backup |
   .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
+
+The receipt is the object that satisfied the success wait, not a later read of mutable backup status. Keep the request-ID check so a different capture cannot be mistaken for this request.
 
 Require this request's success and full snapshot identity. BackupFailed retains a complete staging capture and is separate from application health. Correct publication inputs and issue another unique request to retry that capture. Its original capture boundary does not advance; request a subsequent fresh capture for later writes. Never delete staging or change state/staging/version while publication is pending. Failed/ambiguous capture does not authorize restart.
 
@@ -638,8 +639,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
   --for="jsonpath={.status.backup.request}=$REQUEST" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for=jsonpath='{.status.backup.success}'=true --timeout=30m
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/backup-result.json"
+  --for=jsonpath='{.status.backup.success}'=true --timeout=30m -o json > "$INSTALL_DIR/backup-result.json"
 jq -e --arg request "$REQUEST" '.status.backup |
   .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
@@ -841,8 +841,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" annotate forgejoapplication/forgejo \
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
   --for="jsonpath={.status.backup.request}=$REQUEST" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for=jsonpath='{.status.backup.success}'=true --timeout=30m
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json > "$INSTALL_DIR/backup-result.json"
+  --for=jsonpath='{.status.backup.success}'=true --timeout=30m -o json > "$INSTALL_DIR/backup-result.json"
 jq -e --arg request "$REQUEST" '.status.backup |
   .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
