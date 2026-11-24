@@ -33,7 +33,7 @@ export PACKAGE_VERSION
 PACKAGE_VERSION=$(helm show chart "$CHART_STAGE/bartl-forgejo" | yq -er '.version')
 ```
 
-The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact artifacts and exercised behavior; this rewritten sequence is not renewed live qualification. The source-only backup-declaration eligibility correction is unreleased and requires a new chart version. These commands use explicit backup selection and do not depend on it. Old flat values are not accepted by 0.2.2.
+The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact artifacts and exercised behavior; the [four-service reference](https://github.com/bartlapp/bartl-app/blob/main/docs/reference-installation/README.md#qualification) records separate composed qualification. The source-only backup-declaration eligibility correction is unreleased and requires a new chart version. These commands use explicit backup selection and do not depend on it. Old flat values are not accepted by 0.2.2.
 
 The registry supplies immutable charts and images; local caches are disposable. Retain configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
 
@@ -199,7 +199,7 @@ Omission means no backup; explicit backup.enabled: false disables it. Schedule i
 
 ## Optional composition with Keycloak and Restic
 
-First operate the selected providers through their own release READMEs. Do not create their deployments, credentials or storage here. Published Keycloak 0.7.0 and Restic 0.3.0 supply declaration files consumed below; their standalone evidence does not qualify this composition. Consume current declarations, not guessed endpoints or provider CRs.
+First operate the selected providers through their own release READMEs. Do not create their deployments, credentials or storage here. Consume current declarations from the selected provider releases, not guessed endpoints or provider CRs.
 
 For **Keycloak instead of direct oidc.issuer**, select its retained deployment and declaration file:
 
