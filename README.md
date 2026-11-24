@@ -390,9 +390,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -527,6 +524,19 @@ Require this request's success and full snapshot identity. BackupFailed retains 
 
 Monitor absent/stale/failed scheduled backups, staging capacity and required secondary protection. The CronJob submits this same request interface. Native locking remains enabled; never blindly unlock. Damaged latest history fails visibly rather than selecting an older point or initializing.
 
+## Apply changes to a running deployment
+
+Starting condition: a running, Ready deployment with publication complete and no native work executing. Edit the intended retained configuration, then **Load retained context** again to refresh declarations and `HELM_INTENT`. Apply scheduling changes without altering the selected native version, hostname, run or routing intent:
+
+```bash
+helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
+```
+
+Native version and endpoint changes retain their dedicated procedures below. Applying configuration does not repair failed state or finish pending publication.
+
 ## Stop and start
 
 Ordinary stop is allowed even during pending/failed publication. Export needed diagnostics and persist intent; do not scale generated Deployments:
@@ -543,9 +553,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Stopped\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -567,9 +574,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -621,9 +625,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -658,9 +659,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Stopped\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -813,9 +811,6 @@ dig @8.8.8.8 +short "$FORGEJO_HOST" A
 helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -866,9 +861,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -918,9 +910,6 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -951,9 +940,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Stopped\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -985,9 +971,6 @@ if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTAN
 helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
   --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
   "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
-GENERATION=$(kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jsonpath='{.metadata.generation}')
-kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo \
-  --for="jsonpath={.status.conditions[?(@.type==\"Ready\")].observedGeneration}=$GENERATION" --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
