@@ -41,7 +41,7 @@ The registry supplies immutable charts and images; local caches are disposable. 
 
 ## Configure a new deployment
 
-Choose unused deployment, service and package keys and a fresh namespace. These assignments preserve unrelated installation entries. Use the replacement sequence for another deployment of the same logical instance.
+Choose unused deployment and service keys and a fresh namespace. Reuse a package key only when its recorded chart and version match the acquired artifact; otherwise choose an unused package key. These assignments preserve unrelated installation entries. Use the replacement sequence for another deployment of the same logical instance.
 
 ```bash
 {
@@ -50,13 +50,16 @@ export INSTANCE=forgejo
 export NS=forgejo-blue
 export RELEASE=forgejo
 export PACKAGE=forgejo
+yq -e '.packages[strenv(PACKAGE)] == null or
+  (.packages[strenv(PACKAGE)].version == strenv(PACKAGE_VERSION) and
+   .packages[strenv(PACKAGE)].chart == "oci://ghcr.io/bartlapp/bartl-forgejo")' "$VALUES" >/dev/null
 yq -i '.deployments[strenv(DEPLOYMENT)] = {
   "instance": strenv(INSTANCE), "cluster": strenv(CLUSTER_ID),
   "namespace": strenv(NS), "release": strenv(RELEASE), "package": strenv(PACKAGE)
 } | .services[strenv(INSTANCE)] = {"bootstrapSecret": "forgejo-bootstrap"} |
-  .packages[strenv(PACKAGE)] = {
+  .packages[strenv(PACKAGE)] = (.packages[strenv(PACKAGE)] // {
     "version": strenv(PACKAGE_VERSION), "chart": "oci://ghcr.io/bartlapp/bartl-forgejo"
-  }' "$VALUES"
+  })' "$VALUES"
 DEPLOYMENT_DIR="$WORK_DIR/clusters/$CLUSTER_ID/applications/$INSTANCE"
 CLUSTER_ENV=../../.envrc
 if [ "$DEPLOYMENT" != "$INSTANCE" ]; then
@@ -612,7 +615,7 @@ Use this sequence for same-release reconstruction or supported native 16.0.7 →
 
 Arrange the interruption/data-loss boundary first. The environment must restrict target **HTTP and SSH** to acceptance operators without alternate-route bypass. No production effects or ordinary writes are allowed during validation. This package has no cross-provider fencing; if predecessor authority cannot be withdrawn, do not promote. DNS changes alone are insufficient.
 
-Before interrupting the source, obtain the replacement's latest stable chart under a new package key. This does not change the source's package or native version:
+Before interrupting the source, obtain the replacement's latest stable chart. Reuse a matching package entry; select an unused key only for a different artifact. This does not change the source's package or native version:
 
 ```bash
 export TARGET_PACKAGE=forgejo-replacement
@@ -621,6 +624,10 @@ TARGET_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
 helm pull oci://ghcr.io/bartlapp/bartl-forgejo --untar --untardir "$TARGET_STAGE"
 export TARGET_PACKAGE_VERSION
 TARGET_PACKAGE_VERSION=$(helm show chart "$TARGET_STAGE/bartl-forgejo" | yq -er '.version')
+MATCHING_PACKAGE=$(yq -o=json '.packages // {}' "$VALUES" |
+  jq -r --arg version "$TARGET_PACKAGE_VERSION" '[to_entries[] |
+    select(.value.chart == "oci://ghcr.io/bartlapp/bartl-forgejo" and .value.version == $version) | .key][0] // empty')
+if [ -n "$MATCHING_PACKAGE" ]; then TARGET_PACKAGE="$MATCHING_PACKAGE"; fi
 ```
 
 ### Capture final writes before source stop
@@ -698,12 +705,15 @@ export TARGET_VERSION=17.0.1
 export SOURCE_DEPLOYMENT SOURCE_DIR SOURCE_HOST
 INSTANCE=$(yq -er '.deployments[strenv(SOURCE_DEPLOYMENT)].instance' "$VALUES")
 export INSTANCE
+yq -e '.packages[strenv(TARGET_PACKAGE)] == null or
+  (.packages[strenv(TARGET_PACKAGE)].version == strenv(TARGET_PACKAGE_VERSION) and
+   .packages[strenv(TARGET_PACKAGE)].chart == "oci://ghcr.io/bartlapp/bartl-forgejo")' "$VALUES" >/dev/null
 yq -i '.deployments[strenv(DEPLOYMENT)] = {
   "instance": strenv(INSTANCE), "cluster": strenv(TARGET_CLUSTER),
   "namespace": strenv(TARGET_NAMESPACE), "release": "forgejo", "package": strenv(TARGET_PACKAGE)
-} | .packages[strenv(TARGET_PACKAGE)] = {
+} | .packages[strenv(TARGET_PACKAGE)] = (.packages[strenv(TARGET_PACKAGE)] // {
   "version": strenv(TARGET_PACKAGE_VERSION), "chart": "oci://ghcr.io/bartlapp/bartl-forgejo"
-} | .operations.deployments[strenv(DEPLOYMENT)] = {
+}) | .operations.deployments[strenv(DEPLOYMENT)] = {
   "replicas": 1, "ingressEnabled": true, "version": strenv(TARGET_VERSION), "hostname": strenv(SOURCE_HOST)
 } | .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
 TARGET_DIR="$WORK_DIR/clusters/$TARGET_CLUSTER/applications/$INSTANCE/deployments/$DEPLOYMENT"
