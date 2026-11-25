@@ -55,6 +55,8 @@ Supply fresh K3s with enforcing NetworkPolicy, Traefik/cert-manager/default file
 
 Setup waits for Keycloak's managed certificate and current-generation application Ready before creating its synthetic realm. A successful token response during bootstrap is not that readiness boundary. Failed setup must be reconciled and its owned fixture removed through the package finalization procedures before a fresh run; do not replay realm creation over uncertain state.
 
+Create the synthetic identity through Keycloak's native user API after creating its realm, rather than embedding it in realm import. Native creation supplies the standard default-role grant needed for account security and MFA self-service; it does not grant realm administration.
+
 The proof supports a fresh cluster without a Forgejo CRD; its first Helm installation creates that definition. Missing-API detection must distinguish confirmed CRD absence from a failed Kubernetes observation, rather than requiring an undocumented pre-installation.
 
 For `acme.fke.systems`, first prepare the [isolated public-plus-staging CA bundle](../bartl-app/docs/reference-installation/README.md#prepare-test-client-trust) and supply its absolute path as `CLIENT_CA_BUNDLE`. Setup selects LE staging for all public fixture services and supplies native Forgejo client trust. Before setup, export `NODE_EXTRA_CA_CERTS="$CLIENT_CA_BUNDLE"`, `CURL_CA_BUNDLE="$CLIENT_CA_BUNDLE"` and `GIT_SSL_CAINFO="$CLIENT_CA_BUNDLE"`. Keep these exports confined to the qualification shell. The proof's combined bundle adds only its private fault-proxy CA; it does not modify system trust. Fresh real-browser OIDC acceptance with isolated staging trust remains a separate required check.
@@ -76,6 +78,23 @@ node tests/package-proof.mjs --lab "$LAB_QUALIFICATION_DIR/lab.json" \
 ```
 
 Proof consumes retained build output, not rebuilt images, and requires a fresh work directory without whitespace. Protect lab.json, credentials and raw evidence. An independently prepared multi-cluster lab may supply `backup.kubeconfig` for endpoint port-forwarding only; application operations retain normal executor access. Preserve all acceptance inputs/source-stop checks. Setup itself remains a fresh single-cluster fixture.
+
+After a full passed proof, perform fresh browser OIDC acceptance on its retained green deployment. The proof leaves it stopped with publication complete and closes its temporary fault proxy. Resume through the same native application API used by the proof, preserving identity, claims and native version; replace only the proxy URL with the fixture's real repository. Do not mix Helm server-side application with the proof's `kubectl-patch` field ownership or force an ownership conflict:
+
+```bash
+LAB="$LAB_QUALIFICATION_DIR/lab.json"
+NS=$(jq -er '.slots.green.namespace' "$LAB")
+REPOSITORY=$(jq -er '.backup.url' "$LAB")
+kubectl -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=5m
+kubectl -n "$NS" get forgejoapplication/forgejo -o json |
+  jq -e '.status.backup.success == true and .status.operation.phase == "Succeeded"'
+kubectl -n "$NS" patch forgejoapplication/forgejo --type=merge \
+  --field-manager=kubectl-patch -p "$(jq -nc --arg repository "$REPOSITORY" \
+    '{spec:{replicas:1,ingress:{enabled:true},backup:{repository:$repository}}}')"
+kubectl -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=10m
+```
+
+Use the green HTTPS URL and the protected native OIDC user in the fixture's `oidc.json`, with a fresh browser session and the selected validating trust. Require provider login, callback and a non-administrator Forgejo account; verify the selected MFA policy separately. Capture subsequent browser-created state through the README's capture interface before finalization. This acceptance extends the same artifact proof; it does not turn the earlier failed setup attempts into passing runs.
 
 After exact-candidate qualification and with stable publication authorized, publish the same retained bytes. Authorization may cover candidate upload and stable publication together; an explicit reserved gate or material exception still requires a decision.
 

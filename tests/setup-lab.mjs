@@ -169,10 +169,15 @@ async function keycloak() {
       clients: [{ clientId: consumers[0].clientId, protocol: 'openid-connect', enabled: true, publicClient: false, secret: clientSecret,
         standardFlowEnabled: true, directAccessGrantsEnabled: false,
         redirectUris: consumers.flatMap(consumer => consumer.redirectUris),
-        webOrigins: consumers.flatMap(consumer => consumer.webOrigins) }],
-      users: [{ username: 'oidc-proof', enabled: true, email: 'oidc-proof@example.invalid', emailVerified: true, firstName: 'OIDC', lastName: 'Proof',
-        credentials: [{ type: 'password', value: userPassword, temporary: false }] }] }), signal: AbortSignal.timeout(30000) });
+        webOrigins: consumers.flatMap(consumer => consumer.webOrigins) }] }), signal: AbortSignal.timeout(30000) });
   if (response.status !== 201) throw new Error(`Disposable Keycloak realm creation returned HTTP ${response.status}`);
+  const userResponse = await fetch(`${base}/admin/realms/${realm}/users`, { method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'oidc-proof', enabled: true,
+      email: 'oidc-proof@example.invalid', emailVerified: true, firstName: 'OIDC', lastName: 'Proof',
+      credentials: [{ type: 'password', value: userPassword, temporary: false }] }),
+    signal: AbortSignal.timeout(30000) });
+  if (userResponse.status !== 201) throw new Error(`Disposable Keycloak user creation returned HTTP ${userResponse.status}`);
   const oidc = { providerName: consumers[0].name, clientId: consumers[0].clientId, clientSecret, issuer,
     discoveryURL: consumers[0].discoveryUrl, callbackURL: consumers[0].callbackUrl, username: 'oidc-proof', password: userPassword };
   await file(join(root, 'oidc.json'), JSON.stringify(oidc, null, 2));
