@@ -14,7 +14,7 @@ Published **0.2.2** supports Linux amd64, Kubernetes 1.30+, one application repl
 
 Supply the [operator tools](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#check-the-workstation), an existing version-1 installation record with complete cluster/resource references and retained access, enforced NetworkPolicy, Traefik, cert-manager and state/staging/reconstruction capacity. [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md) supplies a single-node profile; an equivalent cluster suffices. Compatible external OIDC/Restic services work without another Bartl package or company tooling.
 
-Use direnv-hooked Bash. For a missing deployment selector, follow [Base's adoption procedure](https://github.com/bartlapp/base-k3s/blob/main/README.md#adopt-a-missing-deployment-selector); refresh the root loader only if incompatible. Equivalent external clusters use [supplied cluster access](https://github.com/bartlapp/base-k3s/blob/main/README.md#use-supplied-cluster-access), without Hetzner machine fields.
+Use direnv-hooked Bash and the prepared cluster directory. Equivalent external clusters use the shared [supplied cluster access](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#use-supplied-cluster-access) procedure, without Hetzner machine fields.
 
 ```bash
 cd "${WORK_DIR_ROOT:-$HOME/bartl}/acme/acme-installation/clusters/cluster-1"
@@ -465,7 +465,7 @@ Native auth records survive capture; independently retain their provider/client.
 
 ### Load retained context
 
-In direnv-hooked Bash, enter the actual deployment directory; a replacement uses its nested `deployments/<deployment>` directory. For a deployment without a selector, use Base's [one-time adoption procedure](https://github.com/bartlapp/base-k3s/blob/main/README.md#adopt-a-missing-deployment-selector).
+In direnv-hooked Bash, enter the actual retained deployment directory; a replacement uses its nested `deployments/<deployment>` directory.
 
 ```bash
 cd "${WORK_DIR_ROOT:-$HOME/bartl}/acme/acme-installation/clusters/cluster-1/applications/forgejo"
