@@ -175,7 +175,7 @@ SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECT
 SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
 ```
 
-Put reader/writer directories under INSTALL_DIR/repository/, each containing password (shared repository encryption key), username, restPassword and optional ca.crt. Restore older protected/backup inputs here if needed; never regenerate existing-history keys. Reader may manage native locks but not backup contents; writer is append-only. Admin/retention/replication authority stays with the backup service.
+Put reader/writer directories under INSTALL_DIR/repository/, each containing password (shared repository encryption key), username, restPassword and optional ca.crt. Restore the retained inputs for existing history; never regenerate existing-history keys. Reader may manage native locks but not backup contents; writer is append-only. Admin/retention/replication authority stays with the backup service.
 
 Create runtime copies only when backup is selected:
 
@@ -194,7 +194,9 @@ Omission means no backup; explicit backup.enabled: false disables it. Schedule i
 
 First operate the selected providers through their own release READMEs. Do not create their deployments, credentials or storage here. Consume current declarations from the selected provider releases, not guessed endpoints or provider CRs.
 
-For **Keycloak instead of direct oidc.issuer**, select its retained deployment and declaration file:
+### Compose with an existing Keycloak
+
+For Keycloak instead of direct oidc.issuer, select its retained deployment and declaration file:
 
 ```bash
 export KC_DEPLOYMENT=keycloak
@@ -219,41 +221,17 @@ yq -i '.resolved.oidc.bindings[strenv(INSTANCE)] = {
 }' "$VALUES"
 ```
 
-The provider binding must match identityProvider. For **composed backup instead of direct backup.repository**, use the selected Restic deployment's declarations and an already admitted dedicated repository:
-
-```bash
-export RESTIC_DEPLOYMENT=restic
-export RESTIC_CONNECTIONS="$WORK_DIR/clusters/cluster-1/applications/restic/restic-connections.yaml"
-export REPOSITORY_NAME=forgejo
-RESTIC_INSTANCE=$(yq -er '.deployments[strenv(RESTIC_DEPLOYMENT)].instance' "$VALUES")
-export RESTIC_INSTANCE
-BACKUP_REPOSITORY=$(yq -er '.backup.providers[strenv(RESTIC_INSTANCE)].repositories[strenv(REPOSITORY_NAME)].repository' "$RESTIC_CONNECTIONS")
-export BACKUP_REPOSITORY
-yq -i '.services[strenv(INSTANCE)].backup.endpoint = strenv(RESTIC_INSTANCE) |
-  .resolved.backup.bindings[strenv(INSTANCE)] = {
-    "endpoint": strenv(RESTIC_INSTANCE), "repository": strenv(BACKUP_REPOSITORY)
-  }' "$VALUES"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
-  --set-string deployment="$DEPLOYMENT" \
-  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
-CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
-FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
-FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
-SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
-SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
-for pair in reader:backupReader writer:backupWriter; do
-  directory=${pair%%:*}; role=${pair#*:}
-  name=$(ROLE="$role" yq -er '.credentials.bindings[strenv(INSTANCE)][strenv(ROLE)].secretName' "$CONNECTIONS")
-  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$name" \
-    --from-file="$INSTALL_DIR/repository/$directory/"
-done
-```
-
-Starting condition: no direct repository override for this composed consumer, and scoped repository input files already supplied through Restic's handoff. Preserve keys and transport passwords. Refresh derived bindings after provider choices change; declarations neither create a repository nor prove protection.
-
 ### Provision the native Keycloak client
 
-Use a current authorized master-realm administrator with admin-cli password grant and realm/client creation/read/secret access. Supply its files under protected/keycloak-admin. It is preparation-only, never a Forgejo runtime credential. Inspect the realm and declared client first:
+The provider binding must match identityProvider. Use a current authorized master-realm administrator with admin-cli password grant and realm/client creation/read/secret access. Supply its files under protected/keycloak-admin. It is preparation-only, never a Forgejo runtime credential.
+
+If this provider's HTTPS endpoint needs a supplied private/staging root, select its complete trusted PEM bundle for native curl in this shell before the commands below:
+
+```bash
+export CURL_CA_BUNDLE=/absolute/path/to/supplied/operator-ca-bundle.pem
+```
+
+Otherwise keep curl's default trust. This does not configure Forgejo's runtime trust; supply that separately under [custom client CA trust](#custom-client-ca-trust). Never disable TLS verification. Inspect the realm and declared client:
 
 ```bash
 ADMIN_DIR="$INSTALL_DIR/protected/keycloak-admin"
@@ -317,7 +295,41 @@ unset TOKEN
 rm -r "$CLIENT_WORK"
 ```
 
-Configure users and MFA through native Keycloak administration. Provider registration does not automatically link native Forgejo accounts.
+Configure users and MFA through native Keycloak administration. Provider registration does not automatically link native Forgejo accounts. Continue with the optional Restic composition if selected; otherwise proceed to [native identity and configuration](#prepare-native-identity-and-configuration).
+
+### Compose with an existing Restic
+
+Starting condition: no direct repository override, scoped inputs already supplied through [Restic's handoff](https://github.com/bartlapp/bartl-restic/blob/main/README.md#connect-an-application), and a dedicated admitted repository. Select the provider's retained deployment and current declarations:
+
+```bash
+export RESTIC_DEPLOYMENT=restic
+export RESTIC_CONNECTIONS="$WORK_DIR/clusters/cluster-1/applications/restic/restic-connections.yaml"
+export REPOSITORY_NAME=forgejo
+RESTIC_INSTANCE=$(yq -er '.deployments[strenv(RESTIC_DEPLOYMENT)].instance' "$VALUES")
+export RESTIC_INSTANCE
+BACKUP_REPOSITORY=$(yq -er '.backup.providers[strenv(RESTIC_INSTANCE)].repositories[strenv(REPOSITORY_NAME)].repository' "$RESTIC_CONNECTIONS")
+export BACKUP_REPOSITORY
+yq -i '.services[strenv(INSTANCE)].backup.endpoint = strenv(RESTIC_INSTANCE) |
+  .resolved.backup.bindings[strenv(INSTANCE)] = {
+    "endpoint": strenv(RESTIC_INSTANCE), "repository": strenv(BACKUP_REPOSITORY)
+  }' "$VALUES"
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
+  --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
+CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
+FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
+FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
+SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
+SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
+for pair in reader:backupReader writer:backupWriter; do
+  directory=${pair%%:*}; role=${pair#*:}
+  name=$(ROLE="$role" yq -er '.credentials.bindings[strenv(INSTANCE)][strenv(ROLE)].secretName' "$CONNECTIONS")
+  kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$name" \
+    --from-file="$INSTALL_DIR/repository/$directory/"
+done
+```
+
+Preserve keys and transport passwords. Refresh derived bindings after provider choices change; declarations neither create a repository nor prove protection. Continue with [native identity and configuration](#prepare-native-identity-and-configuration); backup-only composition does not require Keycloak administration.
 
 ## Prepare native identity and configuration
 
@@ -368,7 +380,7 @@ After changing or removing the supplied trust, recreate the configuration Secret
 
 ### Render configuration
 
-Bootstrap applies only to genuinely empty state. Render native configuration and append retained identity keys without printing protected content:
+Starting condition: the selected chart and current declarations are available, together with the deployment's retained native identity and any client-CA inputs. For an existing deployment, [prepare the chart-backed operation](#prepare-a-chart-backed-operation) first. Render native configuration and append retained identity keys without printing protected content; this procedure does not generate identity or bootstrap credentials:
 
 ```bash
 helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
@@ -411,11 +423,11 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get service forgejo-ssh -o wide
 curl --fail --silent --show-error --output /dev/null "$FORGEJO_URL"
 ```
 
-Require current-generation Ready and the intended native version, trusted HTTPS and actual SSH reachability. Through authenticated HTTP/SSH, clone and push a synthetic repository; verify LFS, issues, pull requests, attachments, packages/releases, permissions and preserved SSH identity as used. LFS returns absolute object URLs, so use the real configured hostname, not client-side URL rewriting. A successful Helm invocation does not establish application acceptance.
+Require current-generation Ready and the intended native version, trusted HTTPS and actual SSH reachability. Verify the installation's agreed useful behavior through its real endpoints: authenticated clone/push and the LFS, collaboration, artifact and permission features actually used. Check retained SSH host identity. LFS returns absolute object URLs, so use the real configured hostname, not client-side URL rewriting. The broad synthetic feature matrix belongs to package qualification; a successful Helm invocation alone is not acceptance.
 
 ### Register Forgejo's native authentication source
 
-For selected OIDC, configuration rendering declares native OAuth arguments, discovery URL and callback but does not mutate Forgejo's database. After successful installation, read those declarations and inspect native auth sources:
+For selected OIDC, configuration rendering declares native OAuth arguments, discovery URL and callback but does not mutate Forgejo's database. After successful installation, read those declarations and inspect native auth sources. When returning in another session, load retained context and [prepare the chart-backed operation](#prepare-a-chart-backed-operation) first:
 
 The commands run in the serving container, so they inherit its optional native `SSL_CERT_FILE` environment without a second CA flag. Use the ready, restarted Pod after trust changes; do not use an old Pod or a workstation binary with different roots.
 
@@ -471,11 +483,28 @@ In direnv-hooked Bash, enter the actual retained deployment directory; a replace
 cd "${WORK_DIR_ROOT:-$HOME/bartl}/acme/acme-installation/clusters/cluster-1/applications/forgejo"
 ```
 
-At the next prompt, reacquire the recorded chart when absent and refresh declaration/operation inputs. Restore protected inputs independently; context loading does not require a running application:
+At the next prompt, the selector has loaded this deployment's recorded cluster access, namespace, release and installation paths:
 
 ```bash
 set -euo pipefail
 umask 077
+```
+
+Context alone is sufficient for status inspection, capture/publication retry and native restart. These operations neither download a chart nor render declarations or recreate credentials.
+
+### Inspect an installed deployment
+
+For status inspection of an application expected to exist:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
+```
+
+### Prepare a chart-backed operation
+
+Starting condition: retained context loaded. Use this preparation only before a Helm operation or configuration/connection rendering. Reacquire the recorded chart when absent and refresh declarations; restore protected inputs only when the selected operation needs them. No running application is required:
+
+```bash
 if [ ! -d "$CHART" ]; then
   mkdir -p "$WORK_DIR/packages/$PACKAGE"
   CHART_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
@@ -495,17 +524,11 @@ SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS
 
 Do not generate identity/bootstrap keys, recreate claims or re-register OIDC to resume. For native auth inspection after resumption, render nonsecret configuration from the same selected chart/deployment first; it does not change an authentication source.
 
-### Inspect an installed deployment
-
-For an application expected to exist, inspect it after loading context. Skip this inspection for retained-state reinstall after deliberate removal:
-
-```bash
-kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
-```
+Continue with the selected operation.
 
 ## Capture and retry publication
 
-Start from a resumed deployment with backup configured. Complete pending publication with its original state/staging claims and native version before changing those inputs or uninstalling. For a new capture, the writer must still be running; the controller owns drainage, stopped copy, permitted resumption and publication:
+Load [retained context](#load-retained-context) only; no chart preparation is needed. Start from a deployment with backup already configured. Complete pending publication with its original state/staging claims and native version before changing those inputs or uninstalling. For a new capture, the writer must still be running; the controller owns drainage, stopped copy, permitted resumption and publication:
 
 ```bash
 REQUEST="manual-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -527,7 +550,7 @@ Monitor absent/stale/failed scheduled backups, staging capacity and required sec
 
 ## Apply changes to a running deployment
 
-Starting condition: a running, Ready deployment with publication complete and no native work executing. Edit the intended retained configuration, then **Load retained context** again to refresh declarations. Apply scheduling changes without altering the selected native version, hostname, run or routing intent:
+Starting condition: a running, Ready deployment with publication complete and no native work executing. Edit the intended retained configuration, then [prepare the chart-backed operation](#prepare-a-chart-backed-operation) to refresh declarations. Apply scheduling changes without altering the selected native version, hostname, run or routing intent:
 
 ```bash
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
@@ -539,7 +562,9 @@ Native version and endpoint changes retain their dedicated procedures below. App
 
 ## Stop and start
 
-Ordinary stop is allowed even during pending/failed publication. Export needed diagnostics and persist intent; do not scale generated Deployments:
+### Stop
+
+[Prepare the chart-backed operation](#prepare-a-chart-backed-operation) first. Ordinary stop is allowed even during pending/failed publication. Export needed diagnostics and persist intent; do not scale generated Deployments:
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
@@ -552,7 +577,11 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jso
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get pods,jobs,deployments
 ```
 
-Require confirmed drainage. Serving can continue through API/controller observation loss; a stop request or unreachable source is not retirement. After a nonfailed stop, start the same retained deployment:
+Require confirmed drainage. Serving can continue through API/controller observation loss; a stop request or unreachable source is not retirement.
+
+### Start
+
+After a nonfailed stop, [prepare the chart-backed operation](#prepare-a-chart-backed-operation) and start the same retained deployment:
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
@@ -565,6 +594,17 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jso
 ```
 
 Verify useful HTTP/SSH behavior without backup access. Failed transitions remain failed across run intent; never clear markers to restart them.
+
+### Restart
+
+Load [retained context](#load-retained-context) only. For an ordinary restart of a running deployment with no executing capture or failed transition:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NS" rollout restart deployment/forgejo
+kubectl --context "$KUBE_CONTEXT" -n "$NS" rollout status deployment/forgejo --timeout=10m
+```
+
+Verify the installation's useful HTTP/SSH behavior. Retained-state restart does not require repository access or OIDC re-registration.
 
 ## Replacement upgrade and promotion
 
@@ -585,7 +625,7 @@ TARGET_PACKAGE_VERSION=$(helm show chart "$TARGET_STAGE/bartl-forgejo" | yq -er 
 
 ### Capture final writes before source stop
 
-Resume the reachable source. Withdraw external HTTP/API and **direct SSH** access using the environment's enforced routing/firewall controls, drain existing clients and prevent concurrent operators/scheduled captures. Keep the source writer running so the package can capture it; do not run the stop block first. Disable ingress and automatic capture scheduling, preserving its prior schedule:
+Load the reachable source's retained context and [prepare the chart-backed operation](#prepare-a-chart-backed-operation). Withdraw external HTTP/API and **direct SSH** access using the environment's enforced routing/firewall controls, drain existing clients and prevent concurrent operators/scheduled captures. Keep the source writer running so the package can capture it; do not run the stop block first. Disable ingress and automatic capture scheduling, preserving its prior schedule:
 
 ```bash
 export SOURCE_DEPLOYMENT="$DEPLOYMENT"
@@ -787,7 +827,7 @@ curl --fail --silent --show-error --output /dev/null "$FORGEJO_URL"
 
 Inspect native preparation logs, selected repository/snapshot and operation result. Require the authorized final point, intended native version and independent PVC UIDs/backing volumes. Native preparation restores the captured version, flushes native queue state and performs the supported forward migration. An empty initialization is not recovery of expected history; lookup/integrity failure does not permit it.
 
-Through restricted real HTTP/SSH, verify clone/push, LFS, issues/PRs, attachment/package/release bytes, grants and SSH host identity. Check ordinary sources are denied. Verify fresh OIDC login if used without rewriting restored auth sources. Produce new synthetic work and another usable recovery point:
+Through restricted real HTTP/SSH, verify the selected point's expected repositories/content, grants, SSH host identity and the installation's agreed useful behavior. Check ordinary sources are denied. Verify fresh OIDC login if selected without rewriting restored auth sources. Push permitted test work, verify its contents and publish another usable recovery point:
 
 ```bash
 REQUEST="manual-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -801,7 +841,9 @@ jq -e --arg request "$REQUEST" '.status.backup |
   .request == $request and .success == true and (.snapshot | test("^[a-f0-9]{64}$"))' "$INSTALL_DIR/backup-result.json"
 ```
 
-The replacement is now accepted under restricted HTTP/SSH access, with a successful subsequent backup. In a composed installation, pause here until cross-service acceptance is complete; keep the source retired and target access restricted.
+Require this capture to include the new work. The maintainer's exhaustive synthetic feature fixtures are not required for each recovery; useful restored behavior, new work and a subsequent usable backup are.
+
+The replacement is now accepted under restricted HTTP/SSH access with a successful subsequent backup. In a composed installation, pause here until cross-service acceptance is complete; keep the source retired and target access restricted.
 
 ### Activate the replacement
 
@@ -825,7 +867,7 @@ An earlier isolated rehearsal may use a deployment-local candidate hostname and 
 
 ## Change the selected endpoint
 
-Starting condition: resumed deployment, approved endpoint change, current publication complete and access restricted during the change. Set the one new hostname; retain existing identity. Update any separately overridden ssh.hostname and native provider callbacks deliberately. If removing an override, delete that field to restore package derivation rather than recording the derived hostname as a permanent choice.
+Starting condition: retained context loaded, [chart-backed operation prepared](#prepare-a-chart-backed-operation), approved endpoint change, current publication complete and access restricted during the change. Set the one new hostname; retain existing identity. Prepare its authorized DNS, matching external certificate if used, and provider callbacks before applying the change below. Managed issuance needs public port 80. Update any separately overridden ssh.hostname deliberately. If removing an override, delete that field to restore package derivation rather than recording the derived hostname as a permanent choice.
 
 ```bash
 export NEW_HOST=forgejo.acme.fke.systems
@@ -866,11 +908,13 @@ if yq -e '.services[strenv(INSTANCE)].endpoints.https.tlsManaged' "$CONNECTIONS"
 fi
 ```
 
-Prepare authorized DNS and a matching external certificate, if used, before this command sequence; managed issuance needs public port 80. Verify real HTTPS/SSH and LFS at the newly advertised endpoint, update approved OIDC callbacks, then reopen access. Never use URL rewriting as LFS acceptance.
+Prepare authorized DNS and a matching external certificate, if used, before applying this change; managed issuance needs public port 80. Verify real HTTPS/SSH and LFS at the newly advertised endpoint and approved OIDC callbacks, then reopen access. Never use URL rewriting as LFS acceptance.
 
 ## Removal and retained-state reinstall
 
-Starting condition: resumed deployment and completed publication. If publication is pending/failed, retry its retained capture through the capture interface while keeping controller, CR, original state/staging claims and native version; failed publication postpones planned uninstall, not ordinary stop. Do not change those inputs to escape the pending operation.
+### Remove the release
+
+Starting condition: retained context loaded, [chart-backed operation prepared](#prepare-a-chart-backed-operation), and completed publication. If publication is pending/failed, retry its retained capture through the capture interface while keeping controller, CR, original state/staging claims and native version; failed publication postpones planned uninstall, not ordinary stop. Do not change those inputs to escape the pending operation.
 
 Persist stop, wait for the current generation and inspect drainage:
 
@@ -895,7 +939,9 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get pvc,secrets,ingress,service
 
 Never uninstall first, bypass finalizers or issue a Helm upgrade between CR deletion and uninstall. Claims, supplied Secrets and shared CRD remain. Namespace/PVC destruction requires separate data-disposition authorization; infrastructure and owned DNS cleanup remain separate.
 
-For authorized reinstall after successful finalization, use the same identity, claims, configuration and supplied Secrets with no competing predecessor or failed marker. In a fresh shell first [load retained context](#load-retained-context), skipping inspection of the deliberately removed application. **Reset retained stop intent** before installing; do not recreate storage or credentials:
+### Reinstall retained state
+
+For authorized reinstall after successful finalization, use the same identity, claims, configuration and supplied Secrets with no competing predecessor or failed marker. In a fresh shell first [load retained context](#load-retained-context), then [prepare the chart-backed operation](#prepare-a-chart-backed-operation); do not inspect the deliberately removed application. If the configuration Secret was lost, restore retained identity/client-CA inputs and repeat [configuration rendering](#render-configuration), not fresh key/bootstrap generation, then return here. **Reset retained stop intent** before installing; do not recreate storage or credentials:
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
@@ -907,7 +953,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o jso
     any(.status.conditions[]; .type == "Ready" and .status == "True" and .observedGeneration == $g)'
 ```
 
-Verify retained native identity/content, new work and another usable backup. Uninstall cannot repair a failed transition or preserve pending publication automatically.
+Verify retained native identity/content, agreed useful behavior and new work, then [capture that work](#capture-and-retry-publication) when backup is configured. Uninstall cannot repair a failed transition or preserve pending publication automatically.
 
 ## Handover and reference
 
