@@ -136,6 +136,8 @@ async function keycloak() {
     ingress: { enabled: true, className: 'traefik', tlsSecretName: 'keycloak-tls', controllerNamespace: 'kube-system', administratorSourceRanges: [] } } } };
   await file(join(root, 'keycloak.values.json'), JSON.stringify(values, null, 2));
   await command('helm', ['upgrade', '--install', 'keycloak', keycloakChart, '-n', namespace, '-f', join(root, 'keycloak.values.json'), '--wait=legacy', '--timeout=5m']);
+  await kubectl('-n', namespace, 'wait', 'certificate/keycloak-tls', '--for=condition=Ready', '--timeout=10m');
+  await ready(namespace, 'keycloakapplication/keycloak', '10m');
   // Native management API, not a substitute login service. Retry startup only;
   // mutating requests below are not blindly retried after uncertain responses.
   const provider = await declaration(keycloakChart, 'keycloak', namespace, values);

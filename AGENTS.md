@@ -53,6 +53,8 @@ Offline checks: `go test ./...` and `node tests/chart.mjs`. Native recipes remai
 
 Supply fresh K3s with enforcing NetworkPolicy, Traefik/cert-manager/default filesystem storage, administrator kubeconfig, Node.js 22+, Helm supporting `--wait=legacy`, kubectl, yq v4, OpenSSL, dig, Git/LFS, OpenSSH and sha256sum. Three distinct deSEC hostnames must resolve only to the lab IPv4, with no AAAA; permit ACME HTTP, HTTPS, SSH NodePorts and pod access to the proof proxy. Setup verifies DNS and checksums Keycloak 0.8.0/Restic 0.3.0 archives. It refuses existing directories/namespaces and is not an existing-installation operator interface.
 
+Setup waits for Keycloak's managed certificate and current-generation application Ready before creating its synthetic realm. A successful token response during bootstrap is not that readiness boundary. Failed setup must be reconciled and its owned fixture removed through the package finalization procedures before a fresh run; do not replay realm creation over uncertain state.
+
 For `acme.fke.systems`, first prepare the [isolated public-plus-staging CA bundle](../bartl-app/docs/reference-installation/README.md#prepare-test-client-trust) and supply its absolute path as `CLIENT_CA_BUNDLE`. Setup selects LE staging for all public fixture services and supplies native Forgejo client trust. Before setup, export `NODE_EXTRA_CA_CERTS="$CLIENT_CA_BUNDLE"`, `CURL_CA_BUNDLE="$CLIENT_CA_BUNDLE"` and `GIT_SSL_CAINFO="$CLIENT_CA_BUNDLE"`. Keep these exports confined to the qualification shell. The proof's combined bundle adds only its private fault-proxy CA; it does not modify system trust. Fresh real-browser OIDC acceptance with isolated staging trust remains a separate required check.
 
 ```bash
