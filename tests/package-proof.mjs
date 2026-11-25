@@ -707,9 +707,13 @@ async function main() {
   }
   // Drain existing declared installations through their finalizers. Keep every
   // old claim and its diagnostics; each new run receives independent claims.
+  const forgejoAPI = (await command('kubectl', ['get', 'crd',
+    'forgejoapplications.forgejo.bartl.sh', '--ignore-not-found', '-o', 'name'])).text;
   for (const slot of continuation ? [empty] : [blue, green, empty]) {
-    const existing = await kube(slot.namespace, ['get', 'forgejoapplication', 'forgejo', '--ignore-not-found', '-o', 'json']);
-    if (existing.text) await remove(slot);
+    const existing = forgejoAPI
+      ? await kube(slot.namespace, ['get', 'forgejoapplication', 'forgejo', '--ignore-not-found', '-o', 'json'])
+      : undefined;
+    if (existing?.text) await remove(slot);
     else {
       const releases = JSON.parse((await command('helm', ['list', '--namespace', slot.namespace, '--filter', '^forgejo$', '--output', 'json'])).text);
       if (releases.length) await command('helm', ['uninstall', 'forgejo', '--namespace', slot.namespace, '--wait', '--timeout', '5m']);

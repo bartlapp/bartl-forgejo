@@ -55,6 +55,8 @@ Supply fresh K3s with enforcing NetworkPolicy, Traefik/cert-manager/default file
 
 Setup waits for Keycloak's managed certificate and current-generation application Ready before creating its synthetic realm. A successful token response during bootstrap is not that readiness boundary. Failed setup must be reconciled and its owned fixture removed through the package finalization procedures before a fresh run; do not replay realm creation over uncertain state.
 
+The proof supports a fresh cluster without a Forgejo CRD; its first Helm installation creates that definition. Missing-API detection must distinguish confirmed CRD absence from a failed Kubernetes observation, rather than requiring an undocumented pre-installation.
+
 For `acme.fke.systems`, first prepare the [isolated public-plus-staging CA bundle](../bartl-app/docs/reference-installation/README.md#prepare-test-client-trust) and supply its absolute path as `CLIENT_CA_BUNDLE`. Setup selects LE staging for all public fixture services and supplies native Forgejo client trust. Before setup, export `NODE_EXTRA_CA_CERTS="$CLIENT_CA_BUNDLE"`, `CURL_CA_BUNDLE="$CLIENT_CA_BUNDLE"` and `GIT_SSL_CAINFO="$CLIENT_CA_BUNDLE"`. Keep these exports confined to the qualification shell. The proof's combined bundle adds only its private fault-proxy CA; it does not modify system trust. Fresh real-browser OIDC acceptance with isolated staging trust remains a separate required check.
 
 ```bash
