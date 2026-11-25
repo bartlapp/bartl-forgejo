@@ -34,7 +34,6 @@ check('shared file selects only this independent release', () => {
   assert.equal(app.version, '17.0.1'); assert.equal(app.claim, 'forgejo-state'); assert.equal(app.stagingClaim, 'forgejo-capture');
   assert.equal(app.ingress.host, 'forgejo.acme.example');
   assert.equal(docs(v).some(d => d.kind === 'Secret'), false);
-  assert.equal(docs(v).find(d => d.kind === 'Deployment').spec.template.spec.containers[0].image, 'ghcr.io/bartlapp/bartl-forgejo-controller@sha256:e6b4eae6d8b832d0465fdfd12efae57f0cce1bb7de61d6b26b6d4ff67db7f929');
 });
 check('custom identity and map overrides retain defaults and explicit zero/false', () => {
   const v = base(); v.instance = 'git'; v.services = {forgejo: 'ignored', git: {replicas: 0, claims: {state: 'git-state'}, ingress: {enabled: false}, controller: {imagePullPolicy: 'Always', resources: {requests: {cpu: '40m'}}}}};

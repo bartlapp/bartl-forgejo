@@ -33,9 +33,9 @@ export PACKAGE_VERSION
 PACKAGE_VERSION=$(helm show chart "$CHART_STAGE/bartl-forgejo" | yq -er '.version')
 ```
 
-The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact published artifacts and exercised behavior; the [four-service reference](https://github.com/bartlapp/bartl-app/blob/main/docs/reference-installation/README.md#qualification) records separate composed qualification. The deployment selector and backup-declaration eligibility correction in this source require the unpublished 0.2.3 chart; do not use the published 0.2.2 archive with the commands below. Qualify and publish 0.2.3 separately before following the registry download path. For an authorized local candidate, select that exact unpacked chart and record its version instead. Old flat values are not accepted.
+The 0.2.3 chart adds deployment selection and corrects backup-declaration eligibility; do not use the published 0.2.2 archive with the commands below. [0.2.3 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.3) identifies exact artifacts, live candidate checks and remaining limits. The [four-service reference](https://github.com/bartlapp/bartl-app/blob/main/docs/reference-installation/README.md#qualification) records separate composed acceptance. Old flat values are not accepted.
 
-The optional client-CA handoff below additionally requires a rebuilt controller/worker image from this source and a chart pinned to that new digest. The chart's retained 0.1.0 image does not implement the handoff. Build, qualify and publish that candidate separately; changing only app.ini or repackaging the chart cannot enable it. No new image or live custom-CA qualification is claimed here.
+The chart pins the rebuilt controller/worker image implementing the optional native client-CA handoff. All fifteen package-proof cases and fresh OIDC/TOTP on the recovered native 17.0.1 target passed with the supplied staging-CA bundle. Changing only app.ini or repackaging an older image cannot enable this handoff. These single-host candidate results do not establish provider-loss recovery or released-package four-service acceptance.
 
 The registry supplies immutable charts and images; local caches are disposable. Retain configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
 
@@ -366,7 +366,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$BOOTSTRAP_SEC
 
 Leave this unset for ordinary production trust. For a private CA or an explicitly isolated staging-ACME test, supply a PEM bundle containing the intended public roots and additional CA certificates. This is outbound Forgejo client trust, not an ingress certificate, an OIDC identity or a backup member. Retain the supplied bundle and selection independently under `protected/client-ca/`; replacement and reinstall recreate the same configuration Secret from those files. Do not put staging roots into normal production inputs.
 
-With the rebuilt candidate described above, select the supplied bundle once:
+With the image pinned by the 0.2.3 chart or a separately qualified successor, select the supplied bundle once:
 
 ```bash
 export CLIENT_CA_BUNDLE=/absolute/path/to/supplied/ca-bundle.pem

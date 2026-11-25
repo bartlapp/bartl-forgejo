@@ -24,7 +24,7 @@ The image source remains reachable at `refs/evidence/candidate-05-source`. `test
 
 Planned removal finished publication before uninstall. Retained-state reinstall produced a new backup whose new Git files, issue and package restored independently. That synthetic single-node capture observed 15.651 seconds of serving-Pod readiness interruption, with a 17.087-second polling upper bound; neither is end-user availability or a production guarantee. Independent volumes on one node do not establish provider-loss fencing.
 
-The source-only backup declaration correction makes omission eligible for preparation and explicit false opt out. Published 0.2.2 declares omission ineligible. Standalone operation still needs a destination to enable backup. The correction requires a new chart release and renewed affected qualification; do not overwrite 0.2.2.
+The 0.2.3 backup declaration correction makes omission eligible for preparation and explicit false opt out. Published 0.2.2 declares omission ineligible. Standalone operation still needs a destination to enable backup. The exact 0.2.3 candidate passed all fifteen package-proof cases and fresh OIDC/TOTP on native 17.0.1; retain artifact identities and limits in its release record, without treating standalone checks as composed acceptance or overwriting 0.2.2.
 
 ## Build and publication identity
 
