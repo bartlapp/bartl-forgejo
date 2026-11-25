@@ -36,11 +36,24 @@ BARTL_FORGEJO_LAB=hetzner OUT=/srv/retained/forgejo-candidate ./build.sh
 
 The build takes an immutable source snapshot through a temporary Git index without changing the user's index. It retains an OCI directory, digest-pinned chart, source archive/hash, source tree, base commit, image reference and checksums; a snapshot tree is not a verified source commit. Existing output directories are refused. For candidates selected for delivery, preserve artifacts and qualification independently before deleting the builder; abandoned candidates follow the operating guide's disposal boundary. Restic 0.19.1 Linux amd64 compressed binary SHA-256 is `f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c`.
 
+Before cluster qualification, follow the [candidate custody boundary](../bartl-app/docs/how-to-bartlize.md#qualify-the-delivered-path). With candidate uploads authorized and isolated registry credentials selected, upload the built image under an unused candidate tag in the existing image repository:
+
+```bash
+OUT=/srv/retained/forgejo-candidate
+CANDIDATE="candidate-$(cat "$OUT/package-version")-$(cut -d: -f2 "$OUT/image.digest")"
+skopeo copy --authfile "$REGISTRY_AUTH_FILE" --preserve-digests \
+  "oci:$OUT/image:candidate" "docker://ghcr.io/bartlapp/bartl-forgejo-controller:$CANDIDATE"
+```
+
+Verify the remote manifest against `image.digest`. Retain the unchanged chart archive, source archive/identity and checksums in the package's draft release and verify retrieval. The cluster can then pull the chart's pinned image before stable chart publication. Candidate upload does not qualify the artifact or select a stable chart.
+
 ## Maintainer qualification
 
 Offline checks: `go test ./...` and `node tests/chart.mjs`. Native recipes remain in `tests/native.sh` and `tests/native-fixture.mjs`. Cluster proof runs only on an authorized/budgeted disposable Hetzner Linux amd64 host, not the workstation.
 
-Supply fresh K3s with enforcing NetworkPolicy, Traefik/cert-manager/default filesystem storage, administrator kubeconfig, Node.js 22+, Helm supporting `--wait=legacy`, kubectl, yq v4, OpenSSL, dig, Git/LFS, OpenSSH and sha256sum. Three distinct deSEC hostnames must resolve only to the lab IPv4, with no AAAA; permit ACME HTTP, HTTPS, SSH NodePorts and pod access to the proof proxy. Setup verifies DNS and checksums Keycloak 0.6.1/Restic 0.3.0 archives. It refuses existing directories/namespaces and is not an existing-installation operator interface.
+Supply fresh K3s with enforcing NetworkPolicy, Traefik/cert-manager/default filesystem storage, administrator kubeconfig, Node.js 22+, Helm supporting `--wait=legacy`, kubectl, yq v4, OpenSSL, dig, Git/LFS, OpenSSH and sha256sum. Three distinct deSEC hostnames must resolve only to the lab IPv4, with no AAAA; permit ACME HTTP, HTTPS, SSH NodePorts and pod access to the proof proxy. Setup verifies DNS and checksums Keycloak 0.8.0/Restic 0.3.0 archives. It refuses existing directories/namespaces and is not an existing-installation operator interface.
+
+For `acme.fke.systems`, first prepare the [isolated public-plus-staging CA bundle](../bartl-app/docs/reference-installation/README.md#prepare-test-client-trust) and supply its absolute path as `CLIENT_CA_BUNDLE`. Setup selects LE staging for all public fixture services and supplies native Forgejo client trust. Before setup, export `NODE_EXTRA_CA_CERTS="$CLIENT_CA_BUNDLE"`, `CURL_CA_BUNDLE="$CLIENT_CA_BUNDLE"` and `GIT_SSL_CAINFO="$CLIENT_CA_BUNDLE"`. Keep these exports confined to the qualification shell. The proof's combined bundle adds only its private fault-proxy CA; it does not modify system trust. Fresh real-browser OIDC acceptance with isolated staging trust remains a separate required check.
 
 ```bash
 export BARTL_FORGEJO_LAB=hetzner BARTL_FORGEJO_DISPOSABLE_CLUSTER=yes
@@ -52,7 +65,7 @@ export BARTL_LAB_IPV4=REPLACE_WITH_LAB_PUBLIC_IPV4
 export LAB_QUALIFICATION_DIR=/home/runner/qualification
 export BARTL_FORGEJO_CHART=/srv/retained/forgejo-candidate/bartl-forgejo-NEW_VERSION.tgz
 bash tests/setup-lab.sh
-export NODE_EXTRA_CA_CERTS="$LAB_QUALIFICATION_DIR/proxy.crt"
+export NODE_EXTRA_CA_CERTS="$LAB_QUALIFICATION_DIR/client-ca.pem"
 node tests/package-proof.mjs --lab "$LAB_QUALIFICATION_DIR/lab.json" \
   --chart "$BARTL_FORGEJO_CHART" --artifacts /srv/retained/forgejo-candidate \
   --work /home/runner/package-proof
@@ -60,7 +73,7 @@ node tests/package-proof.mjs --lab "$LAB_QUALIFICATION_DIR/lab.json" \
 
 Proof consumes retained build output, not rebuilt images, and requires a fresh work directory without whitespace. Protect lab.json, credentials and raw evidence. An independently prepared multi-cluster lab may supply `backup.kubeconfig` for endpoint port-forwarding only; application operations retain normal executor access. Preserve all acceptance inputs/source-stop checks. Setup itself remains a fresh single-cluster fixture.
 
-After separate publication authorization, live policy/access inspection and exact-candidate qualification, publish the same retained bytes:
+After exact-candidate qualification and with stable publication authorized, publish the same retained bytes. Authorization may cover candidate upload and stable publication together; an explicit reserved gate or material exception still requires a decision.
 
 ```bash
 skopeo copy --preserve-digests oci:/srv/retained/forgejo-candidate/image:candidate \

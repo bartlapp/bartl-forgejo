@@ -11,8 +11,12 @@ const host = process.env.BARTL_FORGEJO_HOST;
 const targetHost = process.env.BARTL_FORGEJO_TARGET_HOST;
 const keycloakHost = process.env.BARTL_KEYCLOAK_HOST;
 const address = process.env.BARTL_LAB_IPV4;
+const clientCABundle = process.env.CLIENT_CA_BUNDLE;
+const staging = [host, targetHost, keycloakHost].some(name =>
+  name === 'acme.fke.systems' || name?.endsWith('.acme.fke.systems'));
+const tls = staging ? { acmeServer: 'https://acme-staging-v02.api.letsencrypt.org/directory' } : {};
 const resticChart = join(root, 'bartl-restic-0.3.0.tgz');
-const keycloakChart = join(root, 'bartl-keycloak-0.6.1.tgz');
+const keycloakChart = join(root, 'bartl-keycloak-0.8.0.tgz');
 const namespaces = ['forgejo-blue', 'forgejo-green', 'forgejo-empty', 'forgejo-backup', 'forgejo-keycloak'];
 const backendHost = 'backup-restic.forgejo-backup.svc.cluster.local';
 const backupURL = `rest:https://${backendHost}/forgejo/`;
@@ -127,7 +131,7 @@ async function keycloak() {
   await ksecret(namespace, 'keycloak-bootstrap', { username: 'admin', password });
   await file(join(root, 'keycloak-admin.json'), JSON.stringify({ username: 'admin', password }));
   const values = { installation: 'forgejo-qualification', instance: 'keycloak', services: { keycloak: {
-    release: '0.6.1', hostname: keycloakHost,
+    release: '0.8.0', hostname: keycloakHost, tls,
     database: { secretName: 'keycloak-database', adminSecretName: 'keycloak-database-admin', size: '5Gi' }, bootstrapAdminSecret: 'keycloak-bootstrap',
     ingress: { enabled: true, className: 'traefik', tlsSecretName: 'keycloak-tls', controllerNamespace: 'kube-system', administratorSourceRanges: [] } } } };
   await file(join(root, 'keycloak.values.json'), JSON.stringify(values, null, 2));
@@ -190,6 +194,12 @@ async function main() {
   if (!address || isIP(address) !== 4) throw new Error('Set BARTL_LAB_IPV4 to the disposable lab public IPv4 address');
   if (!isAbsolute(root)) throw new Error('LAB_QUALIFICATION_DIR must be an absolute remote path');
   if (!isAbsolute(process.env.BARTL_FORGEJO_CHART || '')) throw new Error('BARTL_FORGEJO_CHART must identify the retained candidate chart archive by absolute path');
+  if (staging && !clientCABundle) throw new Error('CLIENT_CA_BUNDLE with public and LE staging roots is required');
+  if (clientCABundle && !isAbsolute(clientCABundle)) throw new Error('CLIENT_CA_BUNDLE must be an absolute path');
+  const clientCA = clientCABundle ? await readFile(clientCABundle) : undefined;
+  if (clientCABundle && process.env.NODE_EXTRA_CA_CERTS !== clientCABundle) {
+    throw new Error('Start setup with NODE_EXTRA_CA_CERTS=$CLIENT_CA_BUNDLE for verified Keycloak HTTPS');
+  }
   process.umask(0o077);
   // This is a fresh-setup tool, not a destructive reset or reconciliation tool.
   // Existing directory/namespace causes refusal, never deletion or credential rotation.
@@ -203,7 +213,7 @@ async function main() {
   await dns();
   await kubectl('-n', 'cert-manager', 'rollout', 'status', 'deployment/cert-manager', '--timeout=5m');
   await releasedChart('bartl-restic', '0.3.0', '57feb5b39b325e3972fe9a9c870cd6c0c5fe54f2f91faba8b4b1652fb4918253');
-  await releasedChart('bartl-keycloak', '0.6.1', '7abb55bcefbcde70dc8f29309d508d314a48783547067b529d48617d23c9225a');
+  await releasedChart('bartl-keycloak', '0.8.0', '996f547c465c6f0e74b9cb2f0fcb8d71cbf48305a5334d251c25e779a7e1d788');
   for (const namespace of namespaces) await apply({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: namespace } });
   const roles = await backend();
   const oidc = await keycloak();
@@ -212,6 +222,9 @@ async function main() {
     '-subj', '/CN=Forgejo qualification fault proxy', '-keyout', proxyTLS.key, '-out', proxyTLS.cert,
     '-addext', `subjectAltName=IP:${address}`, '-addext', 'basicConstraints=critical,CA:TRUE']);
   const proxyCA = await readFile(proxyTLS.cert);
+  await file(join(root, 'client-ca.pem'), Buffer.concat([
+    ...(clientCA ? [clientCA, Buffer.from('\n')] : []), proxyCA,
+  ]));
   for (const role of ['reader', 'writer']) {
     roles[role]['ca.crt'] = Buffer.concat([roles[role]['ca.crt'], Buffer.from('\n'), proxyCA]);
   }
@@ -231,7 +244,7 @@ async function main() {
     await ksecret(namespace, 'forgejo-backup-reader', roles.reader);
     await ksecret(namespace, 'forgejo-backup-writer', roles.writer);
     const values = { installation: 'forgejo-qualification', instance: 'forgejo', services: { forgejo: {
-      hostname: slotHost, version: '16.0.7', replicas: 1,
+      hostname: slotHost, version: '16.0.7', replicas: 1, tls,
       claims: { state: 'forgejo-state', staging: 'forgejo-capture' }, configurationSecret: 'forgejo-configuration', bootstrapSecret: 'forgejo-bootstrap',
       backup: { repository: backupURL, readerSecret: 'forgejo-backup-reader', writerSecret: 'forgejo-backup-writer' },
       oidc: { issuer: oidc.issuer, name: 'Keycloak' },
@@ -240,7 +253,10 @@ async function main() {
     await file(join(dir, 'values.json'), JSON.stringify(values, null, 2));
     const config = await nativeConfiguration(namespace, join(dir, 'values.json'), recoveryIdentity);
     await file(join(dir, 'app.ini'), config);
-    await ksecret(namespace, 'forgejo-configuration', { 'app.ini': config });
+    await ksecret(namespace, 'forgejo-configuration', {
+      'app.ini': config,
+      ...(clientCA ? { 'ca-bundle.pem': clientCA, SSL_CERT_FILE: '/configuration/ca-bundle.pem' } : {}),
+    });
     slots[slot] = { namespace, release: 'forgejo', host: slotHost, url: `https://${slotHost}`,
       values: join(dir, 'values.json'), configuration: join(dir, 'app.ini'), sshNodePort: 30222 + index };
   }

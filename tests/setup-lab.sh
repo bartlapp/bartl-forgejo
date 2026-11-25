@@ -13,7 +13,7 @@ fi
 : "${BARTL_FORGEJO_TARGET_HOST:?Set the distinct nonproductive target Forgejo DNS name}"
 : "${BARTL_KEYCLOAK_HOST:?Set the public Keycloak DNS name}"
 : "${BARTL_LAB_IPV4:?Set the disposable lab public IPv4 address}"
-for prerequisite in node kubectl helm openssl sudo certbot dig systemctl; do
+for prerequisite in node kubectl helm yq openssl dig; do
   command -v "$prerequisite" >/dev/null || { printf 'Missing prerequisite: %s\n' "$prerequisite" >&2; exit 2; }
 done
 umask 077

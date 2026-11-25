@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 // Invoke only on the authorized Hetzner host. All raw evidence stays there.
-// NODE_EXTRA_CA_CERTS=/home/runner/qualification/proxy.crt node tests/package-proof.mjs --lab /home/runner/qualification/lab.json \
+// NODE_EXTRA_CA_CERTS=/home/runner/qualification/client-ca.pem node tests/package-proof.mjs --lab /home/runner/qualification/lab.json \
 //   --chart /srv/retained/candidate/bartl-forgejo-0.2.3.tgz \
 //   --artifacts /srv/retained/candidate --work /home/runner/package-proof-01
 // Continuation: add --continue-from /absolute/original-work and optionally
@@ -40,7 +40,7 @@ const gitEnv = {
   GIT_COMMITTER_NAME: 'Package proof', GIT_COMMITTER_EMAIL: 'package-proof@example.invalid',
 };
 function environment(extra = {}) {
-  return { ...Object.fromEntries(['PATH', 'HOME', 'LANG', 'KUBECONFIG', 'TMPDIR'].filter(k => process.env[k]).map(k => [k, process.env[k]])), ...gitEnv, ...extra };
+  return { ...Object.fromEntries(['PATH', 'HOME', 'LANG', 'KUBECONFIG', 'TMPDIR', 'CURL_CA_BUNDLE', 'GIT_SSL_CAINFO', 'NODE_EXTRA_CA_CERTS'].filter(k => process.env[k]).map(k => [k, process.env[k]])), ...gitEnv, ...extra };
 }
 async function command(program, argv, { input, env, cwd = work, allowFailure = false, sensitive = false, quiet = false } = {}) {
   const id = String(++seq).padStart(6, '0');
