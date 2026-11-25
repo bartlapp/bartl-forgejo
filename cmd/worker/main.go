@@ -83,6 +83,13 @@ func (w *worker) run(command string) error {
 	default:
 		return errors.New("expected prepare, serve, capture or publish")
 	}
+	// Go's system-root loader otherwise ignores missing/malformed optional
+	// files. Refuse supplied invalid trust before mutating any application state.
+	if command == "prepare" || command == "serve" {
+		if err := validateNativeTrust(); err != nil {
+			return err
+		}
+	}
 	// Kernel exclusion complements the controller's single-writer lifecycle. It
 	// is released on process death, unlike the durable interrupted-mutation mark.
 	lockRoot := filepath.Join(w.data, ".bartl")

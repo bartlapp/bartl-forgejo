@@ -55,6 +55,7 @@ check('nonsecret native configuration owns every supported path and disabled eff
   for (const line of ['RUN_USER = git', 'WORK_PATH = /data', 'PATH = /data/data/forgejo.db', 'ROOT = /data/data/repositories', 'SSH_LISTEN_PORT = 2222', 'SSH_SERVER_HOST_KEYS = ssh/forgejo.ed25519', 'DISABLE_WEBHOOKS = true', 'DISABLE_GIT_HOOKS = true', 'ACCOUNT_LINKING = disabled', 'PATH = /data/data/packages']) assert.ok(config.appIni.includes(line), line);
   for (const key of ['SECRET_KEY =', 'INTERNAL_TOKEN =', 'LFS_JWT_SECRET =']) assert.equal(config.appIni.includes(key), false);
   assert.deepEqual(config.retainedIdentity, {security: ['SECRET_KEY', 'INTERNAL_TOKEN'], server: ['LFS_JWT_SECRET']});
+  assert.deepEqual(config.optionalClientCA, {environmentKey: 'SSL_CERT_FILE', bundleKey: 'ca-bundle.pem', bundlePath: '/configuration/ca-bundle.pem'});
 });
 check('offline unresolved declarations require no dependencies or deployment resources', () => {
   const v = base(); service(v).identityProvider = 'accounts'; service(v).backup = {endpoint: 'archive'};

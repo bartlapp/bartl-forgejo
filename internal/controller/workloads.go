@@ -51,6 +51,11 @@ func (r *Reconciler) pod(a *api.ForgejoApplication, command string) corev1.PodSp
 		op = a.Status.Operation.ID
 	}
 	env := []corev1.EnvVar{{Name: "DATA_DIR", Value: "/data"}, {Name: "STAGING_DIR", Value: "/staging"}, {Name: "CONFIG_FILE", Value: "/configuration/app.ini"}, {Name: "VERSION", Value: version}, {Name: "INSTALLATION_ID", Value: a.Spec.Identity.Installation}, {Name: "INSTANCE_ID", Value: a.Spec.Identity.Instance}, {Name: "OPERATION_ID", Value: op}}
+	// Native Go TLS clients (including admin auth CLI invocations via exec)
+	// consume this optional input from the already mounted configuration Secret.
+	if command == "prepare" || command == "serve" {
+		env = append(env, corev1.EnvVar{Name: "SSL_CERT_FILE", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: a.Spec.ConfigurationSecret}, Key: "SSL_CERT_FILE", Optional: ptr(true)}}})
+	}
 	volumes := []corev1.Volume{{Name: "state", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: a.Spec.Claim}}}, {Name: "configuration", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: a.Spec.ConfigurationSecret}}}, {Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
 	mounts := []corev1.VolumeMount{{Name: "state", MountPath: "/data"}, {Name: "configuration", MountPath: "/configuration", ReadOnly: true}, {Name: "tmp", MountPath: "/tmp"}}
 	if command == "publish" {

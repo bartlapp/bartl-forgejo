@@ -35,6 +35,8 @@ PACKAGE_VERSION=$(helm show chart "$CHART_STAGE/bartl-forgejo" | yq -er '.versio
 
 The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact published artifacts and exercised behavior; the [four-service reference](https://github.com/bartlapp/bartl-app/blob/main/docs/reference-installation/README.md#qualification) records separate composed qualification. The deployment selector and backup-declaration eligibility correction in this source require the unpublished 0.2.3 chart; do not use the published 0.2.2 archive with the commands below. Qualify and publish 0.2.3 separately before following the registry download path. For an authorized local candidate, select that exact unpacked chart and record its version instead. Old flat values are not accepted.
 
+The optional client-CA handoff below additionally requires a rebuilt controller/worker image from this source and a chart pinned to that new digest. The chart's retained 0.1.0 image does not implement the handoff. Build, qualify and publish that candidate separately; changing only app.ini or repackaging the chart cannot enable it. No new image or live custom-CA qualification is claimed here.
+
 The registry supplies immutable charts and images; local caches are disposable. Retain configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
 
 ## Configure a new deployment
@@ -345,6 +347,27 @@ BOOTSTRAP_SECRET=$(yq -er '.credentials.bindings[strenv(INSTANCE)].bootstrap.sec
 kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$BOOTSTRAP_SECRET" --from-file="$INSTALL_DIR/protected/bootstrap/"
 ```
 
+### Custom client CA trust
+
+Leave this unset for ordinary production trust. For a private CA or an explicitly isolated staging-ACME test, supply a PEM bundle containing the intended public roots and additional CA certificates. This is outbound Forgejo client trust, not an ingress certificate, an OIDC identity or a backup member. Retain the supplied bundle and selection independently under `protected/client-ca/`; replacement and reinstall recreate the same configuration Secret from those files. Do not put staging roots into normal production inputs.
+
+With the rebuilt candidate described above, select the supplied bundle once:
+
+```bash
+export CLIENT_CA_BUNDLE=/absolute/path/to/supplied/ca-bundle.pem
+mkdir -p "$INSTALL_DIR/protected/client-ca"
+cp "$CLIENT_CA_BUNDLE" "$INSTALL_DIR/protected/client-ca/ca-bundle.pem"
+printf '%s' /configuration/ca-bundle.pem > "$INSTALL_DIR/protected/client-ca/SSL_CERT_FILE"
+```
+
+The existing configuration Secret mounts these files read-only at `/configuration`. Its optional `SSL_CERT_FILE` key becomes the native process environment variable, including for `kubectl exec` native `admin auth` commands. The worker explicitly preserves it for Forgejo web/preparation processes and rejects empty, unreadable or malformed supplied bundles before state mutation. An absent key retains the native default environment. Never bypass an untrusted issuer or a wrong TLS hostname.
+
+For [Forgejo 16.0.7](https://codeberg.org/forgejo/forgejo/src/tag/v16.0.7/services/auth/source/oauth2/providers_openid.go) and [17.0.1](https://codeberg.org/forgejo/forgejo/src/tag/v17.0.1/services/auth/source/oauth2/providers_openid.go), OIDC uses Goth's `openidConnect.New`, not a Forgejo `ROOT_CA_CERTS` app.ini setting. Both pin [Goth 1.82.0](https://github.com/markbates/goth/blob/v1.82.0/providers/openidConnect/openidConnect.go), whose discovery, token and userinfo clients use Go TLS; on Linux, [Go's native root loader](https://github.com/golang/go/blob/go1.26.10/src/crypto/x509/root_unix.go) reads `SSL_CERT_FILE`. Certificate and hostname verification remain enabled. This does not configure browser, workstation, Git or Restic trust.
+
+After changing or removing the supplied trust, recreate the configuration Secret through the following recipe, then run `kubectl --context "$KUBE_CONTEXT" -n "$NS" rollout restart deployment/forgejo` and `kubectl --context "$KUBE_CONTEXT" -n "$NS" rollout status deployment/forgejo --timeout=5m`. Do not mutate only a mounted file and assume the running Go process reloaded cached roots. Remove both retained client-CA files to return to default trust, not just the PEM file. Verify a fresh real-browser OIDC login through discovery, token exchange and userinfo; successful startup or auth-source registration alone is insufficient.
+
+### Render configuration
+
 Bootstrap applies only to genuinely empty state. Render native configuration and append retained identity keys without printing protected content:
 
 ```bash
@@ -359,14 +382,16 @@ yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DI
   printf '\n[server]\nLFS_JWT_SECRET = %s\n' "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
 } >> "$INSTALL_DIR/protected/app.ini"
 CONFIG_SECRET=$(yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
+mkdir -p "$INSTALL_DIR/protected/client-ca"
 kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
-  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
+  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" \
+  --from-file="$INSTALL_DIR/protected/client-ca/" --dry-run=client -o yaml |
   kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
 ```
 
 Rendering starts from the chart template, not an old app.ini. It supplies native paths, URLs/ports and disabled-effect settings. Retain configuration/identity independently before installation. Backup captures native state and identity/version/integrity metadata; target configuration, TLS and repository credentials remain separate recovery inputs.
 
-Retain `protected/identity/` and `repository/{reader,writer}` with the logical instance across replacements. Bootstrap credentials are for first initialization, not resetting restored users. Retain the OIDC client secret and provider binding independently; Keycloak administrator credentials are preparation-only. `protected/app.ini` is regenerated from retained configuration and identity. Externally supplied `tls/` files belong to the target deployment. Keep all plaintext inputs outside Git.
+Retain `protected/identity/`, any supplied `protected/client-ca/` and `repository/{reader,writer}` with the logical instance across replacements. Bootstrap credentials are for first initialization, not resetting restored users. Retain the OIDC client secret and provider binding independently; Keycloak administrator credentials are preparation-only. `protected/app.ini` is regenerated from retained configuration and identity. Externally supplied `tls/` files belong to the target deployment. Keep all plaintext inputs outside Git.
 
 ## Install and observe
 
@@ -391,6 +416,8 @@ Require current-generation Ready and the intended native version, trusted HTTPS 
 ### Register Forgejo's native authentication source
 
 For selected OIDC, configuration rendering declares native OAuth arguments, discovery URL and callback but does not mutate Forgejo's database. After successful installation, read those declarations and inspect native auth sources:
+
+The commands run in the serving container, so they inherit its optional native `SSL_CERT_FILE` environment without a second CA flag. Use the ready, restarted Pod after trust changes; do not use an old Pod or a workstation binary with different roots.
 
 ```bash
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
@@ -714,8 +741,10 @@ yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DI
   printf '\n[server]\nLFS_JWT_SECRET = %s\n' "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
 } >> "$INSTALL_DIR/protected/app.ini"
 CONFIG_SECRET=$(yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
+mkdir -p "$INSTALL_DIR/protected/client-ca"
 kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
-  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
+  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" \
+  --from-file="$INSTALL_DIR/protected/client-ca/" --dry-run=client -o yaml |
   kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
 ```
 
@@ -820,8 +849,10 @@ yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DI
   printf '\n[server]\nLFS_JWT_SECRET = %s\n' "$(cat "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET")"
 } >> "$INSTALL_DIR/protected/app.ini"
 CONFIG_SECRET=$(yq -er '.configuration[strenv(INSTANCE)].secretName' "$CONFIGURATION")
+mkdir -p "$INSTALL_DIR/protected/client-ca"
 kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET" \
-  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
+  --from-file="app.ini=$INSTALL_DIR/protected/app.ini" \
+  --from-file="$INSTALL_DIR/protected/client-ca/" --dry-run=client -o yaml |
   kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m

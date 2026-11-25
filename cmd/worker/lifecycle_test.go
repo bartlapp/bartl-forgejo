@@ -3,14 +3,17 @@ package main
 
 import (
 	"bytes"
+	"encoding/pem"
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -349,5 +352,141 @@ func TestNativeStartFailureRetainsUncertainty(t *testing.T) {
 	}
 	if pending, e := exists(w.shutdownPath()); e != nil || !pending {
 		t.Fatalf("startup boundary lost durable uncertainty: %v marker=%v", e, pending)
+	}
+}
+
+func TestNativeTrustBundleValidation(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	for _, tc := range []struct {
+		name      string
+		data      []byte
+		wantError bool
+	}{
+		{name: "valid certificate", data: certificate},
+		{name: "multiple certificates", data: append(append([]byte{}, certificate...), certificate...)},
+		{name: "commented public CA bundle", data: append(append([]byte("# Public roots\n"), certificate...), []byte("# End of bundle\n")...)},
+		{name: "empty", wantError: true},
+		{name: "invalid PEM", data: []byte("not a certificate"), wantError: true},
+		{name: "invalid DER", data: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("invalid")}), wantError: true},
+		{name: "private key", data: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("invalid")}), wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ca-bundle.pem")
+			if err := os.WriteFile(path, tc.data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SSL_CERT_FILE", path)
+			if err := validateNativeTrust(); (err != nil) != tc.wantError {
+				t.Fatalf("validation = %v, want error %v", err, tc.wantError)
+			}
+		})
+	}
+	for _, path := range []string{"", "relative.pem", filepath.Join(t.TempDir(), "missing.pem")} {
+		t.Run("invalid path "+path, func(t *testing.T) {
+			t.Setenv("SSL_CERT_FILE", path)
+			if err := validateNativeTrust(); err == nil {
+				t.Fatal("supplied invalid trust accepted")
+			}
+			w := &worker{id: identity{"installation", "instance"}, data: filepath.Join(t.TempDir(), "uncreated"), staging: t.TempDir(), version: "17.0.1", operation: "prepare"}
+			if err := w.run("prepare"); err == nil || !strings.Contains(err.Error(), "SSL_CERT_FILE") {
+				t.Fatalf("worker did not refuse invalid trust: %v", err)
+			}
+			if _, err := os.Stat(w.data); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("invalid trust mutated state: %v", err)
+			}
+		})
+	}
+}
+
+func TestNativeTrustEnvironmentIsNarrow(t *testing.T) {
+	t.Setenv("SSL_CERT_FILE", "/configuration/ca-bundle.pem")
+	t.Setenv("SSL_CERT_DIR", "/untrusted")
+	t.Setenv("RESTIC_PASSWORD", "must-not-leak")
+	t.Setenv("GIT_SSL_NO_VERIFY", "true")
+	w := &worker{data: "/data"}
+	for _, args := range [][]string{{"web"}, {"admin", "auth", "add-oauth"}, {"admin", "auth", "update-oauth"}} {
+		cmd := w.nativeCommand("17.0.1", "/data/app.ini", args...)
+		found := false
+		for _, entry := range cmd.Env {
+			if entry == "SSL_CERT_FILE=/configuration/ca-bundle.pem" {
+				found = true
+			}
+			for _, forbidden := range []string{"SSL_CERT_DIR=", "RESTIC_PASSWORD=", "GIT_SSL_NO_VERIFY="} {
+				if strings.HasPrefix(entry, forbidden) {
+					t.Fatalf("native environment leaked %s", forbidden)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%v lost native trust", args)
+		}
+	}
+	t.Setenv("SSL_CERT_FILE", "")
+	if err := os.Unsetenv("SSL_CERT_FILE"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeTrust(); err != nil {
+		t.Fatalf("omitted optional trust changed defaults: %v", err)
+	}
+	for _, entry := range w.nativeEnv() {
+		if strings.HasPrefix(entry, "SSL_CERT_FILE=") {
+			t.Fatal("ordinary native environment overrides default trust")
+		}
+	}
+}
+
+func TestNativeTrustHTTPSHelper(t *testing.T) {
+	target := os.Getenv("BARTL_TRUST_TEST_URL")
+	if target == "" {
+		return
+	}
+	response, err := http.Get(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+}
+
+func TestNativeTrustVerifiesTLS(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("SSL_CERT_FILE is the combined image's native Linux Go trust interface")
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), "ca-bundle.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		bundle    string
+		target    string
+		wantError string
+	}{
+		{name: "untrusted issuer", bundle: "/dev/null", target: server.URL, wantError: "unknown authority"},
+		{name: "supplied trust", bundle: path, target: server.URL},
+		{name: "wrong hostname", bundle: path, target: strings.Replace(server.URL, "127.0.0.1", "localhost", 1), wantError: "certificate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SSL_CERT_FILE", tc.bundle)
+			cmd := exec.Command(executable, "-test.run=^TestNativeTrustHTTPSHelper$")
+			cmd.Env = append((&worker{data: t.TempDir()}).nativeEnv(), "BARTL_TRUST_TEST_URL="+tc.target, "SSL_CERT_DIR="+t.TempDir())
+			output, err := cmd.CombinedOutput()
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("trusted native TLS failed: %v: %s", err, output)
+				}
+			} else if err == nil || !strings.Contains(string(output), tc.wantError) {
+				t.Fatalf("wanted TLS refusal containing %q, got %v: %s", tc.wantError, err, output)
+			}
+		})
 	}
 }

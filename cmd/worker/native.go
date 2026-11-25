@@ -2,6 +2,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,7 +18,30 @@ func (w *worker) nativeEnv() []string {
 	home := filepath.Join(w.data, "home")
 	// Explicit environment prevents backup credentials and caller Git overrides
 	// reaching Forgejo, its hooks or its child processes.
-	return []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=" + home, "USER=git", "LOGNAME=git", "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "XDG_CACHE_HOME=" + filepath.Join(home, ".cache"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(home, ".gitconfig"), "GIT_TERMINAL_PROMPT=0", "TMPDIR=/tmp"}
+	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=" + home, "USER=git", "LOGNAME=git", "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "XDG_CACHE_HOME=" + filepath.Join(home, ".cache"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(home, ".gitconfig"), "GIT_TERMINAL_PROMPT=0", "TMPDIR=/tmp"}
+	if path, supplied := os.LookupEnv("SSL_CERT_FILE"); supplied {
+		env = append(env, "SSL_CERT_FILE="+path)
+	}
+	return env
+}
+
+func validateNativeTrust() error {
+	path, supplied := os.LookupEnv("SSL_CERT_FILE")
+	if !supplied {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return errors.New("SSL_CERT_FILE must name an absolute PEM bundle path")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read SSL_CERT_FILE: %w", err)
+	}
+	// Use the native PEM loader: ordinary public bundles include comments.
+	if !x509.NewCertPool().AppendCertsFromPEM(data) {
+		return errors.New("SSL_CERT_FILE contains no usable PEM certificates")
+	}
+	return nil
 }
 func (w *worker) nativeCommand(version, config string, args ...string) *exec.Cmd {
 	all := append([]string{"--work-path", w.data, "--custom-path", filepath.Join(w.data, "custom"), "--config", config}, args...)

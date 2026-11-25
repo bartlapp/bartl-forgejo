@@ -73,6 +73,10 @@ configuration:
   {{ $instance | quote }}:
     secretName: {{ $service.configurationSecret | quote }}
     key: app.ini
+    optionalClientCA:
+      environmentKey: SSL_CERT_FILE
+      bundleKey: ca-bundle.pem
+      bundlePath: /configuration/ca-bundle.pem
     appIni: |
       {{- include "forgejo.appIni" $service | nindent 6 }}
     retainedIdentity:

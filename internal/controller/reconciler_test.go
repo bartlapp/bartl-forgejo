@@ -129,3 +129,35 @@ func TestPublicationClearsStaleReady(t *testing.T) {
 		t.Fatal("publication did not accept restored intent generation")
 	}
 }
+
+func TestOptionalNativeTrustUsesConfigurationSecret(t *testing.T) {
+	a := application()
+	r := &Reconciler{Image: "candidate"}
+	for _, command := range []string{"prepare", "serve", "capture", "publish"} {
+		pod := r.pod(a, command)
+		container := pod.Containers[0]
+		found := false
+		for _, env := range container.Env {
+			if env.Name != "SSL_CERT_FILE" {
+				continue
+			}
+			found = true
+			ref := env.ValueFrom.SecretKeyRef
+			if ref.Name != a.Spec.ConfigurationSecret || ref.Key != "SSL_CERT_FILE" || ref.Optional == nil || !*ref.Optional {
+				t.Fatalf("%s has incorrect optional native CA reference: %+v", command, ref)
+			}
+		}
+		if found != (command == "prepare" || command == "serve") {
+			t.Fatalf("%s has incorrect native client trust boundary: present=%v", command, found)
+		}
+		mounted := false
+		for _, mount := range container.VolumeMounts {
+			if mount.Name == "configuration" && mount.MountPath == "/configuration" && mount.ReadOnly {
+				mounted = true
+			}
+		}
+		if !mounted {
+			t.Fatalf("%s lost existing read-only configuration mount", command)
+		}
+	}
+}
