@@ -1,15 +1,10 @@
 # Repository instructions
 
-Before changing package configuration, lifecycle behavior, installation procedures or qualification, read this repository's README and both governing documents:
+Read this repository's [README](README.md) before changing configuration, lifecycle behavior, procedures or qualification.
 
-- [Bartl application contract](https://github.com/bartlapp/bartl-app/blob/main/docs/application-contract.md), including Standalone operation and Supported configuration and catalogue evidence.
-- [How to bartlize](https://github.com/bartlapp/bartl-app/blob/main/docs/how-to-bartlize.md), including the applicable package interface and qualification procedure.
+For coordinated local work, follow the sibling [bartl-app entry point](../bartl-app/AGENTS.md) and its local contract and operating guide. If that checkout is unavailable, use the public [application contract](https://github.com/bartlapp/bartl-app/blob/main/docs/application-contract.md) and [operating guide](https://github.com/bartlapp/bartl-app/blob/main/docs/how-to-bartlize.md). These documents own the requirements; this file does not restate them.
 
-Read the documents before implementation; listing them as future reading is insufficient. They govern implementation and acceptance. For coordinated local work, use the bartl-app checkout carrying the approved contract changes; in bartl-app itself, read docs/application-contract.md and docs/how-to-bartlize.md. Otherwise use the canonical public documents linked above. Identify the source revision used. Resolve conflicting governing versions before implementation rather than silently choosing one.
-
-Preserve the contract's standalone operating path. Company-specific installation tooling may compose packages but must not become necessary to operate them. The contract, not this instruction file, owns the detailed requirements.
-
-Before declaring affected package behavior or operating procedures complete, provide the standalone qualification evidence required by the contract, tied to the exact delivered artifacts, in the existing package qualification or release record. Existing evidence may be reused only where it still covers the behavior and applicable artifacts. Passing installation-generator tests is not a substitute. If required verification cannot be performed, report implementation progress and the outstanding acceptance requirement; do not declare the behavior complete. Documentation-only changes require document verification, not an unrelated deployment exercise.
+Identify the governing revision and relevant local changes. Honor a requested exact revision, resolve conflicting versions before implementation, and do not switch branches automatically. Unpublished local guidance does not establish public package availability or qualification.
 
 ## Historical evidence
 
@@ -33,13 +28,13 @@ The source-only backup declaration correction makes omission eligible for prepar
 
 ## Build and publication identity
 
-Never build on the workstation. Use an authorized Hetzner Linux amd64 builder with sufficient independently retained artifact capacity:
+Build deliverable images only on an authorized Hetzner Linux amd64 builder with sufficient independently retained artifact capacity. The offline checks below may run on the workstation:
 
 ```bash
 BARTL_FORGEJO_LAB=hetzner OUT=/srv/retained/forgejo-candidate ./build.sh
 ```
 
-The build takes an immutable source snapshot through a temporary Git index without changing the user's index. It retains an OCI directory, digest-pinned chart, source archive/hash, source tree, base commit, image reference and checksums; a snapshot tree is not a verified source commit. Existing output directories are refused. Preserve artifacts and qualification independently before deleting the builder. Restic 0.19.1 Linux amd64 compressed binary SHA-256 is `f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c`.
+The build takes an immutable source snapshot through a temporary Git index without changing the user's index. It retains an OCI directory, digest-pinned chart, source archive/hash, source tree, base commit, image reference and checksums; a snapshot tree is not a verified source commit. Existing output directories are refused. For candidates selected for delivery, preserve artifacts and qualification independently before deleting the builder; abandoned candidates follow the operating guide's disposal boundary. Restic 0.19.1 Linux amd64 compressed binary SHA-256 is `f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c`.
 
 ## Maintainer qualification
 
