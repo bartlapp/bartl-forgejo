@@ -105,3 +105,55 @@ helm push "$BARTL_FORGEJO_CHART" oci://ghcr.io/bartlapp
 ```
 
 Verify the registry digest against image.digest and retain chart checksum, source archive/tree and qualification identities in the release record. Charts select immutable digests, not publication tags. Publication is not part of build.sh. Never overwrite published versions or silently change visibility/access; retain cleanup/budget outcomes.
+
+## Dispose of the qualification fixture
+
+After required artifact/evidence retention and authorized synthetic-data disposition, stop the retained blue/green applications through the same API owner used by the proof. Use the fixture's selected cluster access and `LAB_QUALIFICATION_DIR`; do not create customer deployment records for these temporary standalone instances:
+
+```bash
+LAB="$LAB_QUALIFICATION_DIR/lab.json"
+for slot in blue green; do
+  NS=$(jq -er --arg slot "$slot" '.slots[$slot].namespace' "$LAB")
+  kubectl -n "$NS" get forgejoapplication/forgejo -o json |
+    jq -e '.status.backup.success == true and .status.operation.phase == "Succeeded"'
+  kubectl -n "$NS" patch forgejoapplication/forgejo --type=merge \
+    --field-manager=kubectl-patch -p '{"spec":{"replicas":0,"ingress":{"enabled":false}}}'
+  kubectl -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=10m
+  kubectl -n "$NS" get forgejoapplication/forgejo -o json |
+    jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
+      any(.status.conditions[]; .type == "Stopped" and .status == "True" and .observedGeneration == $g)'
+  kubectl -n "$NS" get pods,jobs
+done
+```
+
+Require no application/native-worker Pods, not merely a successful patch. Then use the [normal finalization order](README.md#remove-the-release), binding each fixture release explicitly:
+
+```bash
+for slot in blue green; do
+  NS=$(jq -er --arg slot "$slot" '.slots[$slot].namespace' "$LAB")
+  RELEASE=$(jq -er --arg slot "$slot" '.slots[$slot].release' "$LAB")
+  kubectl -n "$NS" delete forgejoapplication/forgejo --wait=true --timeout=20m
+  helm uninstall "$RELEASE" -n "$NS" --wait --timeout=5m
+done
+```
+
+Retire dependencies only after all consumers have stopped. The fixture retains direct-instance values, not deployment selectors. Persist stop in those files before applying their unchanged charts:
+
+```bash
+yq -i '.services.keycloak.application.replicas = 0 | .services.keycloak.ingress.enabled = false' \
+  "$LAB_QUALIFICATION_DIR/keycloak.values.json"
+helm upgrade keycloak "$LAB_QUALIFICATION_DIR/bartl-keycloak-0.8.0.tgz" \
+  -n forgejo-keycloak --reset-values -f "$LAB_QUALIFICATION_DIR/keycloak.values.json" \
+  --wait=legacy --timeout=5m
+```
+
+Require current-generation `Stopped` and `Quiescent` with no executing native work, then follow [Keycloak removal](../bartl-keycloak/README.md#uninstall-the-deployment) with `NS=forgejo-keycloak` and `RELEASE=keycloak`. This fixture has no Keycloak backup schedule to suspend.
+
+```bash
+yq -i '.services.restic.replicas = 0' "$LAB_QUALIFICATION_DIR/backup/values.json"
+helm upgrade backup "$LAB_QUALIFICATION_DIR/bartl-restic-0.3.0.tgz" \
+  -n forgejo-backup --reset-values -f "$LAB_QUALIFICATION_DIR/backup/values.json" \
+  --wait=legacy --timeout=5m
+```
+
+Continue [Restic's stop/drain and finalization checks](../bartl-restic/README.md#supported-uninstall) with `NS=forgejo-backup`, `RELEASE=backup` and `CLAIM=repository`; do not run its deployment-selector preparation against these standalone fixture values. Keep controllers alive until their applications finalize. Only afterward delete the fixture-owned namespaces/PVCs under the authorized data disposition, remove its owned DNS records, and dispose of protected fixture files. Preserve the base, shared CRDs and operator/provider identities.
