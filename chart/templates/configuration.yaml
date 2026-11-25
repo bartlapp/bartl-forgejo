@@ -66,10 +66,11 @@ PATH = /data/data/{{ $path }}
 {{- end -}}
 {{- if eq .Values.renderMode "configuration" }}
 {{- $service := include "forgejo.service" . | fromYaml }}
+{{- $instance := (include "forgejo.selection" . | fromYaml).instance }}
 {{- $backup := include "forgejo.backup" (dict "root" . "service" $service) | fromYaml }}
 {{- $oidc := include "forgejo.oidc" (dict "root" . "service" $service) | fromYaml }}
 configuration:
-  {{ .Values.instance | quote }}:
+  {{ $instance | quote }}:
     secretName: {{ $service.configurationSecret | quote }}
     key: app.ini
     appIni: |

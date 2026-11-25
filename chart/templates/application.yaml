@@ -1,5 +1,5 @@
 {{- if eq .Values.renderMode "deployment" }}
-{{- if ne .Release.Name "forgejo" }}{{- fail "Install release forgejo; choose one logical instance per namespace" }}{{- end }}
+{{- $selection := include "forgejo.selection" . | fromYaml }}
 {{- $service := include "forgejo.service" . | fromYaml }}
 {{- $oidc := include "forgejo.oidc" (dict "root" . "service" $service) | fromYaml }}
 {{- $backup := include "forgejo.backup" (dict "root" . "service" $service) | fromYaml }}
@@ -11,7 +11,7 @@ metadata:
 spec:
   identity:
     installation: {{ .Values.installation | quote }}
-    instance: {{ .Values.instance | quote }}
+    instance: {{ $selection.instance | quote }}
   version: {{ $service.version | quote }}
   replicas: {{ $service.replicas }}
   claim: {{ $service.claims.state | quote }}

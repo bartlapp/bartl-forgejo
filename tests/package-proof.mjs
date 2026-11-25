@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Invoke only on the authorized Hetzner host. All raw evidence stays there.
 // NODE_EXTRA_CA_CERTS=/home/runner/qualification/proxy.crt node tests/package-proof.mjs --lab /home/runner/qualification/lab.json \
-//   --chart /srv/retained/candidate/bartl-forgejo-0.2.2.tgz \
+//   --chart /srv/retained/candidate/bartl-forgejo-0.2.3.tgz \
 //   --artifacts /srv/retained/candidate --work /home/runner/package-proof-01
 // Continuation: add --continue-from /absolute/original-work and optionally
 // --malformed-from /absolute/malformed-work, always with a fresh --work.

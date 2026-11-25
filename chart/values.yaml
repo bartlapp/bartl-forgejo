@@ -1,4 +1,5 @@
 # Independent releases consume the same installation values file.
-instance: forgejo
+# Optional deployment selector; otherwise instance defaults to forgejo.
+deployment: ""
 renderMode: deployment
 services: {}

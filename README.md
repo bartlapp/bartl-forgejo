@@ -33,7 +33,7 @@ export PACKAGE_VERSION
 PACKAGE_VERSION=$(helm show chart "$CHART_STAGE/bartl-forgejo" | yq -er '.version')
 ```
 
-The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact artifacts and exercised behavior; the [four-service reference](https://github.com/bartlapp/bartl-app/blob/main/docs/reference-installation/README.md#qualification) records separate composed qualification. The source-only backup-declaration eligibility correction is unreleased and requires a new chart version. These commands use explicit backup selection and do not depend on it. Old flat values are not accepted by 0.2.2.
+The chart retains the 0.1.0 runtime image. [0.2.2 release evidence](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.2.2) identifies exact published artifacts and exercised behavior; the [four-service reference](https://github.com/bartlapp/bartl-app/blob/main/docs/reference-installation/README.md#qualification) records separate composed qualification. The deployment selector and backup-declaration eligibility correction in this source require the unpublished 0.2.3 chart; do not use the published 0.2.2 archive with the commands below. Qualify and publish 0.2.3 separately before following the registry download path. For an authorized local candidate, select that exact unpacked chart and record its version instead. Old flat values are not accepted.
 
 The registry supplies immutable charts and images; local caches are disposable. Retain configuration, native identity, repository history/keys and routing/SSH host-key records independently of the covered failure domain. Agree interruption, final-write boundary, source retirement, protection/retention, monitoring and capacity before relying on the installation.
 
@@ -78,17 +78,8 @@ cd "$DEPLOYMENT_DIR"
 Wait for the next prompt: the selector loads the recorded deployment and chart path. The service defaults to native 17.0.1 and a hostname derived from `dns.root`. Set optional hostname, native version, claim, SSH/TLS or dependency choices before rendering:
 
 ```bash
-VERSION="$PACKAGE_VERSION"
-HELM_INSTANCE=${INSTANCE//./\\.}
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -100,7 +91,7 @@ kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
 kubectl --context "$KUBE_CONTEXT" create namespace "$NS"
 ```
 
-Never inherit source access when selecting another target. The four optional deployment intents are replicas, ingressEnabled, native version and hostname; 0.2.2 consumes instance and explicit Helm overrides, not a deployment selector. Absent intent leaves chart/service settings effective.
+The chart applies this deployment's optional replicas, ingressEnabled, native version and hostname intent over its selected service and defaults. Absent intent leaves service settings effective. Selecting another target never imports source intent; standalone charts without a deployment selector still accept `--set-string instance="$INSTANCE"`.
 
 Create two independent operator-owned claims, writable by UID/GID and fsGroup 1000, supporting SQLite locks, atomic rename and fsync. Adjust the example capacities once before creation:
 
@@ -154,8 +145,8 @@ For external OIDC, choose the provider-supplied issuer and render its client/cal
 ```bash
 export OIDC_ISSUER=https://login.example.org/realms/acme
 yq -i '.services[strenv(INSTANCE)].oidc.issuer = strenv(OIDC_ISSUER)' "$VALUES"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -172,8 +163,8 @@ For backup, supply a dedicated initialized HTTPS Restic repository and independe
 ```bash
 export REPOSITORY_URL=rest:https://backup.example.org/forgejo/
 yq -i '.services[strenv(INSTANCE)].backup.repository = strenv(REPOSITORY_URL)' "$VALUES"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -209,8 +200,8 @@ export KC_CONNECTIONS="$WORK_DIR/clusters/cluster-1/applications/keycloak/connec
 KC_INSTANCE=$(yq -er '.deployments[strenv(KC_DEPLOYMENT)].instance' "$VALUES")
 export KC_INSTANCE
 yq -i '.services[strenv(INSTANCE)].identityProvider = strenv(KC_INSTANCE)' "$VALUES"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -240,8 +231,8 @@ yq -i '.services[strenv(INSTANCE)].backup.endpoint = strenv(RESTIC_INSTANCE) |
   .resolved.backup.bindings[strenv(INSTANCE)] = {
     "endpoint": strenv(RESTIC_INSTANCE), "repository": strenv(BACKUP_REPOSITORY)
   }' "$VALUES"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -357,8 +348,8 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$BOOTSTRAP_SEC
 Bootstrap applies only to genuinely empty state. Render native configuration and append retained identity keys without printing protected content:
 
 ```bash
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=configuration --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
 yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DIR/protected/app.ini"
@@ -380,16 +371,8 @@ Retain `protected/identity/` and `repository/{reader,writer}` with the logical i
 ## Install and observe
 
 ```bash
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -411,8 +394,8 @@ For selected OIDC, configuration rendering declares native OAuth arguments, disc
 
 ```bash
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=configuration --show-only templates/configuration.yaml > "$CONFIGURATION"
 NAME=$(yq -er '.configuration[strenv(INSTANCE)].oidc.name' "$CONFIGURATION")
 CLIENT=$(yq -er '.configuration[strenv(INSTANCE)].oidc.clientId' "$CONFIGURATION")
@@ -473,17 +456,8 @@ if [ ! -d "$CHART" ]; then
   mv "$CHART_STAGE/bartl-forgejo" "$CHART"
   rm -r "$CHART_STAGE"
 fi
-VERSION="$PACKAGE_VERSION"
-HELM_INSTANCE=${INSTANCE//./\\.}
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -492,7 +466,7 @@ SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECT
 SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
 ```
 
-Do not generate identity/bootstrap keys, recreate claims or re-register OIDC to resume. For native auth inspection after resumption, render nonsecret configuration from the same retained chart/intent first; it does not change an authentication source.
+Do not generate identity/bootstrap keys, recreate claims or re-register OIDC to resume. For native auth inspection after resumption, render nonsecret configuration from the same selected chart/deployment first; it does not change an authentication source.
 
 ### Inspect an installed deployment
 
@@ -526,12 +500,11 @@ Monitor absent/stale/failed scheduled backups, staging capacity and required sec
 
 ## Apply changes to a running deployment
 
-Starting condition: a running, Ready deployment with publication complete and no native work executing. Edit the intended retained configuration, then **Load retained context** again to refresh declarations and `HELM_INTENT`. Apply scheduling changes without altering the selected native version, hostname, run or routing intent:
+Starting condition: a running, Ready deployment with publication complete and no native work executing. Edit the intended retained configuration, then **Load retained context** again to refresh declarations. Apply scheduling changes without altering the selected native version, hostname, run or routing intent:
 
 ```bash
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 ```
 
@@ -543,16 +516,8 @@ Ordinary stop is allowed even during pending/failed publication. Export needed d
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -564,16 +529,8 @@ Require confirmed drainage. Serving can continue through API/controller observat
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -615,16 +572,8 @@ BACKUP_SCHEDULE=$(cat "$SOURCE_DIR/backup-schedule-before-operation")
 export BACKUP_SCHEDULE
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled = false |
   .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -649,16 +598,8 @@ Require successful publication of this fresh final capture, inclusion of the fin
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -713,20 +654,11 @@ cd "$TARGET_DIR"
 }
 ```
 
-Wait for the next prompt. Keep the source-input directory and saved backup schedule available until activation succeeds. Load this target's explicit native-version and hostname intent; do not reuse the source's `HELM_INTENT` array:
+Wait for the next prompt. Keep the source-input directory and saved backup schedule available until activation succeeds. The selected deployment supplies the target's native-version and hostname intent without reusing source settings:
 
 ```bash
-VERSION="$PACKAGE_VERSION"
-HELM_INSTANCE=${INSTANCE//./\\.}
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -757,8 +689,8 @@ Restore the original native identity, not fresh keys or source-mounted state. Fo
 Refresh declarations and native configuration after the selected repository/endpoint choices:
 
 ```bash
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
@@ -771,8 +703,8 @@ for pair in reader:backupReader writer:backupWriter; do
   kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$name" \
     --from-file="$INSTALL_DIR/repository/$directory/"
 done
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=configuration --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
 yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DIR/protected/app.ini"
@@ -809,8 +741,7 @@ dig @8.8.8.8 +short "$FORGEJO_HOST" A
 
 ```bash
 helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -851,16 +782,8 @@ After standalone acceptance or the coordinator's activation decision, restore th
 BACKUP_SCHEDULE=$(cat "$SOURCE_DIR/backup-schedule-before-operation")
 export BACKUP_SCHEDULE
 yq -i '.services[strenv(INSTANCE)].backup.schedule = strenv(BACKUP_SCHEDULE)' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -878,23 +801,16 @@ Starting condition: resumed deployment, approved endpoint change, current public
 ```bash
 export NEW_HOST=forgejo.acme.fke.systems
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].hostname = strenv(NEW_HOST)' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=connections --show-only templates/connections.yaml > "$INSTALL_DIR/forgejo-connections.yaml"
 CONNECTIONS="$INSTALL_DIR/forgejo-connections.yaml"
 FORGEJO_URL=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.url' "$CONNECTIONS")
 FORGEJO_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.https.hostname' "$CONNECTIONS")
 SSH_HOST=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.hostname' "$CONNECTIONS")
 SSH_PORT=$(yq -er '.services[strenv(INSTANCE)].endpoints.ssh.port' "$CONNECTIONS")
-helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" "${HELM_INTENT[@]}" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
+helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
+  --set-string deployment="$DEPLOYMENT" \
   --set-string renderMode=configuration --show-only templates/configuration.yaml > "$INSTALL_DIR/forgejo-configuration.yaml"
 CONFIGURATION="$INSTALL_DIR/forgejo-configuration.yaml"
 yq -er '.configuration[strenv(INSTANCE)].appIni' "$CONFIGURATION" > "$INSTALL_DIR/protected/app.ini"
@@ -908,8 +824,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET
   --from-file="app.ini=$INSTALL_DIR/protected/app.ini" --dry-run=client -o yaml |
   kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -930,16 +845,8 @@ Persist stop, wait for the current generation and inspect drainage:
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 0' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -961,16 +868,8 @@ For authorized reinstall after successful finalization, use the same identity, c
 
 ```bash
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].replicas = 1' "$VALUES"
-REPLICAS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].replicas, .services[strenv(INSTANCE)].replicas, 1] | map(select(. != null)) | .[0]' "$VALUES")
-INGRESS=$(yq -r '[.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled, .services[strenv(INSTANCE)].ingress.enabled, true] | map(select(. != null)) | .[0]' "$VALUES")
-NATIVE_VERSION=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].version // ""' "$VALUES")
-TARGET_HOST=$(yq -r '.operations.deployments[strenv(DEPLOYMENT)].hostname // ""' "$VALUES")
-HELM_INTENT=(--set "services.$HELM_INSTANCE.replicas=$REPLICAS" --set "services.$HELM_INSTANCE.ingress.enabled=$INGRESS")
-if [ -n "$NATIVE_VERSION" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.version=$NATIVE_VERSION"); fi
-if [ -n "$TARGET_HOST" ]; then HELM_INTENT+=(--set-string "services.$HELM_INSTANCE.hostname=$TARGET_HOST"); fi
 helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
-  --set-string instance="$INSTANCE" --set-string "services.$HELM_INSTANCE.release=$VERSION" \
-  "${HELM_INTENT[@]}" --wait=legacy --timeout=5m
+  --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
   jq -e '.metadata.generation as $g | .status.observedGeneration == $g and
@@ -983,7 +882,7 @@ Verify retained native identity/content, new work and another usable backup. Uni
 
 Hand over exact artifacts, effective installation/native configuration, native identity, volume inventory, protected keys, repository history, reader/writer/admin role boundaries, HTTPS/SSH routing/host-key records, identity dependencies, monitoring/retention responsibility and these procedures. Recovery inputs must be usable without the lost cluster or its Keycloak.
 
-The chart's [interface schema](chart/interface.schema.json) and [defaults](chart/defaults.yaml) define service choices. Omitted fields derive/default, maps merge, lists replace and false/zero remain effective. Unknown selected-service fields fail; unrelated installation content is ignored. Public connections expose HTTPS/SSH endpoints, OIDC/backup requests, credential requirements/bindings and state/staging claims. Configuration output provides native app.ini and optional OAuth arguments; protected identity remains external. Refresh calculated resolved bindings after provider choices change.
+The chart's [interface schema](chart/interface.schema.json) and [defaults](chart/defaults.yaml) define service choices. Select a deployment with `--set-string deployment="$DEPLOYMENT"` to validate its release, namespace and package version and apply only its own operation intent; direct `instance` selection remains supported for standalone values without deployment records. Omitted fields derive/default, maps merge, lists replace and false/zero remain effective. Unknown selected-service fields fail; unrelated installation content is ignored. Public connections expose HTTPS/SSH endpoints, OIDC/backup requests, credential requirements/bindings and state/staging claims. Configuration output provides native app.ini and optional OAuth arguments; protected identity remains external. Refresh calculated resolved bindings after provider choices change.
 
 [Maintainer procedures and historical evidence](AGENTS.md#historical-evidence) retain exact runtime qualification and build/publication instructions. Historical application reconstruction on one node does not qualify this rewritten sequence, provider-loss activation or production-scale interruption limits.
 

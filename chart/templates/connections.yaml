@@ -1,5 +1,6 @@
 {{- if eq .Values.renderMode "connections" }}
 {{- $service := include "forgejo.service" . | fromYaml }}
+{{- $instance := (include "forgejo.selection" . | fromYaml).instance }}
 {{- $backup := $service.backup }}
 {{- $requested := true }}
 {{- if hasKey $backup "enabled" }}{{- $requested = $backup.enabled }}{{- end }}
@@ -32,7 +33,7 @@
   {{- $_ := set $bindings "tls" (dict "secretName" $service.ingress.tlsSecret) }}
 {{- end }}
 services:
-  {{ .Values.instance | quote }}:
+  {{ $instance | quote }}:
     endpoints:
       https:
         url: {{ $url | quote }}
@@ -48,7 +49,7 @@ services:
         exposure: {{ $service.ssh.exposure | quote }}
 oidc:
   requests:
-    {{ .Values.instance | quote }}:
+    {{ $instance | quote }}:
       enabled: {{ $oidcEnabled }}
       {{- if $oidcEnabled }}
       {{- with $service.identityProvider }}
@@ -66,7 +67,7 @@ oidc:
       {{- end }}
 backup:
   requests:
-    {{ .Values.instance | quote }}:
+    {{ $instance | quote }}:
       enabled: {{ $requested }}
       {{- if $requested }}
       {{- with $backup.endpoint }}
@@ -80,14 +81,14 @@ backup:
       {{- end }}
 credentials:
   requirements:
-    {{ .Values.instance | quote }}:
+    {{ $instance | quote }}:
       {{- toYaml $requirements | nindent 6 }}
   bindings:
-    {{ .Values.instance | quote }}:
+    {{ $instance | quote }}:
       {{- toYaml $bindings | nindent 6 }}
 storage:
   claims:
-    {{ .Values.instance | quote }}:
+    {{ $instance | quote }}:
       {{- range $role, $claim := $service.claims }}
       {{ $role }}:
         claimName: {{ $claim | quote }}

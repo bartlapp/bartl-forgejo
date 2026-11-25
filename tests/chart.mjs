@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const chart = process.env.FORGEJO_CHART || fileURLToPath(new URL('../chart', import.meta.url));
-function render(values, {mode = 'deployment', release = 'forgejo'} = {}) {
-  return spawnSync(process.env.HELM || 'helm', ['template', release, chart, '-f', '-', '--set-string', `renderMode=${mode}`], {input: JSON.stringify(values), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024});
+function render(values, {mode = 'deployment', release = 'forgejo', namespace = 'default', deployment} = {}) {
+  const args = ['template', release, chart, '-n', namespace, '-f', '-', '--set-string', `renderMode=${mode}`];
+  if (deployment) args.push('--set-string', `deployment=${deployment}`);
+  return spawnSync(process.env.HELM || 'helm', args, {input: JSON.stringify(values), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024});
 }
 function documents(result) {
   assert.equal(result.status, 0, result.stderr);
@@ -15,10 +17,12 @@ function documents(result) {
 }
 const base = () => ({installation: 'acme', dns: {root: 'acme.example'}, services: {forgejo: {}}});
 const service = v => v.services[v.instance || 'forgejo'];
-const docs = v => documents(render(v));
+const selection = v => v.deployments?.[v.deployment];
+const instance = v => selection(v)?.instance || v.instance || 'forgejo';
+const docs = v => documents(render(v, {release: selection(v)?.release || 'forgejo', namespace: selection(v)?.namespace || 'default', deployment: v.deployment}));
 const spec = v => docs(v).find(d => d.kind === 'ForgejoApplication').spec;
-const declaration = v => documents(render(v, {mode: 'connections', release: 'offline'}))[0];
-const configuration = v => documents(render(v, {mode: 'configuration', release: 'offline'}))[0].configuration[v.instance || 'forgejo'];
+const declaration = v => documents(render(v, {mode: 'connections', release: selection(v)?.release || 'offline', namespace: selection(v)?.namespace || 'default', deployment: v.deployment}))[0];
+const configuration = v => documents(render(v, {mode: 'configuration', release: selection(v)?.release || 'offline', namespace: selection(v)?.namespace || 'default', deployment: v.deployment}))[0].configuration[instance(v)];
 function rejects(v, options) { assert.notEqual(render(v, options).status, 0, 'invalid interface rendered successfully'); }
 let checks = 0;
 function check(name, fn) { fn(); checks++; console.log('PASS ' + name); }
@@ -121,9 +125,54 @@ check('native SSH Service exposes only serving pods and advertises explicit Node
   assert.ok(configuration(v).appIni.includes('SSH_PORT = 30222')); assert.equal(declaration(v).services.forgejo.endpoints.ssh.port, 30222);
   delete service(v).ssh.nodePort; rejects(v); service(v).ssh = {nodePort: 30222}; rejects(v);
 });
-check('exact release consistency and deployment-only Helm release name guard', () => {
-  const v = base(); service(v).release = '0.2.2'; spec(v); declaration(v); configuration(v); rejects(v, {release: 'wrong'});
+check('exact release consistency remains valid for standalone instance selection', () => {
+  const v = base(); service(v).release = '0.2.3'; spec(v); declaration(v); configuration(v);
   service(v).release = '0.1.0'; for (const mode of ['deployment', 'connections', 'configuration']) rejects(v, {mode});
+});
+check('selected deployment resolves its own instance, intent and all renders', () => {
+  const v = base(); v.deployment = 'target';
+  v.deployments = {target: {instance: 'git', namespace: 'green', release: 'git-target', package: 'new'}, source: {instance: 'git', namespace: 'blue', release: 'git-source', package: 'old'}};
+  v.packages = {new: {version: '0.2.3'}, old: {version: '0.2.3'}};
+  v.services = {forgejo: {unknown: 'ignored'}, git: {replicas: 1, version: '16.0.7', ingress: {enabled: true}, hostname: 'source.example', backup: {enabled: false}}};
+  v.operations = {deployments: {target: {replicas: 0, ingressEnabled: false, version: '17.0.1', hostname: 'target.example'}, source: {replicas: 1, ingressEnabled: true, version: '16.0.7', hostname: 'source.example'}}};
+  const app = spec(v);
+  assert.deepEqual(app.identity, {installation: 'acme', instance: 'git'});
+  assert.equal(app.replicas, 0); assert.equal(app.ingress.enabled, false); assert.equal(app.version, '17.0.1'); assert.equal(app.ingress.host, 'target.example');
+  assert.equal(declaration(v).services.git.endpoints.https.url, 'https://target.example');
+  assert.ok(configuration(v).appIni.includes('ROOT_URL = https://target.example/'));
+  v.deployment = 'source'; assert.equal(spec(v).version, '16.0.7'); assert.equal(spec(v).ingress.host, 'source.example');
+  assert.equal(declaration(v).services.git.endpoints.https.url, 'https://source.example');
+  assert.ok(configuration(v).appIni.includes('ROOT_URL = https://source.example/'));
+});
+check('selected nondefault identity uses only its OIDC and backup bindings', () => {
+  const v = base(); v.deployment = 'target';
+  v.deployments = {target: {instance: 'git', namespace: 'green', release: 'git-target', package: 'new'}};
+  v.packages = {new: {version: '0.2.3'}};
+  v.services = {forgejo: {unknown: true}, git: {identityProvider: 'accounts', backup: {endpoint: 'archive'}}};
+  v.resolved = {
+    oidc: {bindings: {forgejo: {provider: 'wrong'}, git: {provider: 'accounts', issuer: 'https://login.example/realms/acme'}}},
+    backup: {bindings: {forgejo: {endpoint: 'wrong'}, git: {endpoint: 'archive', repository: 'rest:https://backup.example/git/'}}}
+  };
+  assert.equal(spec(v).backup.repository, 'rest:https://backup.example/git/');
+  assert.equal(configuration(v).oidc.clientId, 'git');
+  assert.equal(declaration(v).oidc.requests.git.clientId, 'git');
+  delete v.resolved.oidc.bindings.git; rejects(v, {deployment: 'target', release: 'git-target', namespace: 'green'});
+});
+check('selected deployment rejects mismatched identity, namespace, release, package and intent', () => {
+  const v = base(); v.services.git = {}; v.deployments = {target: {instance: 'git', namespace: 'green', release: 'git-target', package: 'new'}};
+  v.packages = {new: {version: '0.2.3'}};
+  const opts = {deployment: 'target', release: 'git-target', namespace: 'green'};
+  documents(render(v, opts));
+  rejects(v, {...opts, namespace: 'blue'}); rejects(v, {...opts, release: 'wrong'});
+  v.instance = 'forgejo'; rejects(v, opts); delete v.instance;
+  v.packages.new.version = '0.2.2'; rejects(v, opts); v.packages.new.version = '0.2.3';
+  delete v.services.git; rejects(v, opts); v.services.git = {};
+  v.operations = {deployments: {target: {replicas: 2}}}; rejects(v, opts);
+  v.operations.deployments.target = {ingressEnabled: 'false'}; rejects(v, opts);
+  v.operations.deployments.target = {version: '18.0.0'}; rejects(v, opts);
+  v.operations.deployments.target = {hostname: 'https://bad.example'}; rejects(v, opts);
+  v.operations.deployments.target = {replicas: 0, ingressEnabled: false};
+  assert.equal(documents(render(v, opts)).find(d => d.kind === 'ForgejoApplication').spec.replicas, 0);
 });
 check('strict selected interface rejects legacy inputs invalid types and unknown fields', () => {
   for (const [key, value] of Object.entries({identity: {}, image: 'legacy', version: '17.0.1', claim: 'state', stagingClaim: 'stage', replicas: 1, ssh: {}, controller: {}})) { const v = base(); v[key] = value; rejects(v); }

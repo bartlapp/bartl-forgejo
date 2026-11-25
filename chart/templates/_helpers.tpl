@@ -63,19 +63,67 @@
 {{- .Files.Get "defaults.yaml" -}}
 {{- end -}}
 
+{{/* Resolve selected deployment intent without modifying shared installation values. */}}
+{{- define "forgejo.selection" -}}
+{{- $instance := .Values.instance | default "forgejo" -}}
+{{- $intent := dict -}}
+{{- if .Values.deployment -}}
+  {{- $id := .Values.deployment -}}
+  {{- $definitions := (mustFromJson (.Files.Get "interface.schema.json")).definitions -}}
+  {{- if not (kindIs "map" .Values.deployments) -}}{{- fail "deployments must be an object when deployment is selected" -}}{{- end -}}
+  {{- if not (hasKey .Values.deployments $id) -}}{{- fail (printf "deployments.%s is required" $id) -}}{{- end -}}
+  {{- $deployment := index .Values.deployments $id -}}
+  {{- include "forgejo.validate" (dict "schema" $definitions.deployment "definitions" $definitions "value" $deployment "path" (printf "deployments.%s" $id)) -}}
+  {{- if and (hasKey .Values "instance") (ne .Values.instance $deployment.instance) -}}
+    {{- fail (printf "instance %s conflicts with deployments.%s.instance %s" .Values.instance $id $deployment.instance) -}}
+  {{- end -}}
+  {{- $instance = $deployment.instance -}}
+  {{- if ne $deployment.namespace .Release.Namespace -}}{{- fail (printf "deployments.%s.namespace %s does not match Helm namespace %s" $id $deployment.namespace .Release.Namespace) -}}{{- end -}}
+  {{- if ne $deployment.release .Release.Name -}}{{- fail (printf "deployments.%s.release %s does not match Helm release %s" $id $deployment.release .Release.Name) -}}{{- end -}}
+  {{- if not (hasKey .Values.services $instance) -}}{{- fail (printf "services.%s is required by deployments.%s.instance" $instance $id) -}}{{- end -}}
+  {{- if not (kindIs "map" .Values.packages) -}}{{- fail "packages must be an object when deployment is selected" -}}{{- end -}}
+  {{- if not (hasKey .Values.packages $deployment.package) -}}{{- fail (printf "packages.%s is required by deployments.%s.package" $deployment.package $id) -}}{{- end -}}
+  {{- $package := index .Values.packages $deployment.package -}}
+  {{- include "forgejo.validate" (dict "schema" $definitions.package "definitions" $definitions "value" $package "path" (printf "packages.%s" $deployment.package)) -}}
+  {{- if ne $package.version .Chart.Version -}}{{- fail (printf "packages.%s.version selects %s but this chart is %s" $deployment.package $package.version .Chart.Version) -}}{{- end -}}
+  {{- if hasKey .Values "operations" -}}
+    {{- if not (kindIs "map" .Values.operations) -}}{{- fail "operations must be an object" -}}{{- end -}}
+    {{- if hasKey .Values.operations "deployments" -}}
+      {{- if not (kindIs "map" .Values.operations.deployments) -}}{{- fail "operations.deployments must be an object" -}}{{- end -}}
+      {{- if hasKey .Values.operations.deployments $id -}}
+        {{- $intent = index .Values.operations.deployments $id -}}
+        {{- include "forgejo.validate" (dict "schema" $definitions.intent "definitions" $definitions "value" $intent "path" (printf "operations.deployments.%s" $id)) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- toYaml (dict "instance" $instance "intent" $intent) -}}
+{{- end -}}
+
 {{- define "forgejo.service" -}}
-{{- $selected := get .Values.services .Values.instance | default dict -}}
-{{- if hasKey .Values.services .Values.instance -}}{{- $selected = index .Values.services .Values.instance -}}{{- end -}}
+{{- $selection := include "forgejo.selection" . | fromYaml -}}
+{{- $instance := $selection.instance -}}
+{{- $selected := dict -}}
+{{- if hasKey .Values.services $instance -}}{{- $selected = index .Values.services $instance -}}{{- end -}}
 {{- $definitions := (mustFromJson (.Files.Get "interface.schema.json")).definitions -}}
-{{- include "forgejo.validate" (dict "schema" $definitions.service "definitions" $definitions "value" $selected "path" (printf "services.%s" .Values.instance)) -}}
-{{- if and (hasKey $selected "release") (ne $selected.release .Chart.Version) -}}{{- fail (printf "services.%s.release selects %s but this chart is %s" .Values.instance $selected.release .Chart.Version) -}}{{- end -}}
+{{- include "forgejo.validate" (dict "schema" $definitions.service "definitions" $definitions "value" $selected "path" (printf "services.%s" $instance)) -}}
+{{- if and (hasKey $selected "release") (ne $selected.release .Chart.Version) -}}{{- fail (printf "services.%s.release selects %s but this chart is %s" $instance $selected.release .Chart.Version) -}}{{- end -}}
 {{- $service := mergeOverwrite (include "forgejo.defaults" . | fromYaml) (deepCopy $selected) -}}
+{{- range $field, $path := dict "replicas" (list "replicas") "ingressEnabled" (list "ingress" "enabled") "version" (list "version") "hostname" (list "hostname") -}}
+  {{- if hasKey $selection.intent $field -}}
+    {{- if eq (len $path) 1 -}}
+      {{- $_ := set $service (first $path) (index $selection.intent $field) -}}
+    {{- else -}}
+      {{- $_ := set (index $service (first $path)) (last $path) (index $selection.intent $field) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- if not (hasKey $service "hostname") -}}
   {{- $domain := required "dns.root is required when the selected Forgejo service has no hostname" (get (get .Values "dns" | default dict) "root") -}}
   {{- $_ := set $service "hostname" (printf "forgejo.%s" $domain) -}}
 {{- end -}}
-{{- if not (hasKey $service.oidc "clientId") -}}{{- $_ := set $service.oidc "clientId" .Values.instance -}}{{- end -}}
-{{- include "forgejo.validate" (dict "schema" $definitions.service "definitions" $definitions "value" $service "path" (printf "services.%s" .Values.instance)) -}}
+{{- if not (hasKey $service.oidc "clientId") -}}{{- $_ := set $service.oidc "clientId" $instance -}}{{- end -}}
+{{- include "forgejo.validate" (dict "schema" $definitions.service "definitions" $definitions "value" $service "path" (printf "services.%s" $instance)) -}}
 {{- if and (hasKey $service.backup "endpoint") (hasKey $service.backup "repository") -}}{{- fail "Forgejo backup must select endpoint or repository, not both" -}}{{- end -}}
 {{- if and (or $service.ingress.enabled $service.tls.managed) (not $service.ingress.tlsSecret) -}}{{- fail "Forgejo ingress.tlsSecret is required for ingress or managed TLS" -}}{{- end -}}
 {{- if ne (len (uniq (values $service.claims))) 2 -}}{{- fail "Forgejo claims must identify two distinct PVCs" -}}{{- end -}}
@@ -99,12 +147,13 @@
   {{- if not (kindIs "map" $oidcResolved) -}}{{- fail "resolved.oidc must be an object" -}}{{- end -}}
   {{- $bindings := get $oidcResolved "bindings" | default dict -}}
   {{- if not (kindIs "map" $bindings) -}}{{- fail "resolved.oidc.bindings must be an object" -}}{{- end -}}
-  {{- if not (hasKey $bindings $root.Values.instance) -}}{{- fail (printf "services.%s.identityProvider requires resolved.oidc.bindings.%s from the selected provider" $root.Values.instance $root.Values.instance) -}}{{- end -}}
-  {{- $binding := index $bindings $root.Values.instance -}}
+  {{- $instance := (include "forgejo.selection" $root | fromYaml).instance -}}
+  {{- if not (hasKey $bindings $instance) -}}{{- fail (printf "services.%s.identityProvider requires resolved.oidc.bindings.%s from the selected provider" $instance $instance) -}}{{- end -}}
+  {{- $binding := index $bindings $instance -}}
   {{- $definitions := (mustFromJson ($root.Files.Get "interface.schema.json")).definitions -}}
-  {{- include "forgejo.validate" (dict "schema" $definitions.oidcBinding "definitions" $definitions "value" $binding "path" (printf "resolved.oidc.bindings.%s" $root.Values.instance)) -}}
+  {{- include "forgejo.validate" (dict "schema" $definitions.oidcBinding "definitions" $definitions "value" $binding "path" (printf "resolved.oidc.bindings.%s" $instance)) -}}
   {{- if ne $binding.provider $service.identityProvider -}}{{- fail "Forgejo OIDC binding provider must match identityProvider" -}}{{- end -}}
-  {{- $bindingClient := $root.Values.instance -}}
+  {{- $bindingClient := $instance -}}
   {{- if hasKey $binding "clientId" -}}{{- $bindingClient = $binding.clientId -}}{{- end -}}
   {{- if ne $bindingClient $oidc.clientId -}}{{- fail "Forgejo OIDC binding clientId must match the selected clientId" -}}{{- end -}}
   {{- $_ := set $oidc "issuer" $binding.issuer -}}
@@ -118,7 +167,8 @@
 {{- $root := .root -}}
 {{- $service := .service -}}
 {{- $desired := $service.backup -}}
-{{- $explicit := (index $root.Values.services $root.Values.instance | default dict).backup | default dict -}}
+{{- $instance := (include "forgejo.selection" $root | fromYaml).instance -}}
+{{- $explicit := (index $root.Values.services $instance | default dict).backup | default dict -}}
 {{- if and (hasKey $desired "enabled") (not $desired.enabled) -}}
   {{- toYaml (dict "enabled" false) -}}
 {{- else -}}
@@ -130,23 +180,23 @@
       {{- if not (kindIs "map" $resolved.backup) -}}{{- fail "resolved.backup must be an object" -}}{{- end -}}
       {{- if hasKey $resolved.backup "bindings" -}}
         {{- if not (kindIs "map" $resolved.backup.bindings) -}}{{- fail "resolved.backup.bindings must be an object" -}}{{- end -}}
-        {{- if hasKey $resolved.backup.bindings $root.Values.instance -}}
-          {{- $binding = index $resolved.backup.bindings $root.Values.instance -}}
+        {{- if hasKey $resolved.backup.bindings $instance -}}
+          {{- $binding = index $resolved.backup.bindings $instance -}}
           {{- $definitions := (mustFromJson ($root.Files.Get "interface.schema.json")).definitions -}}
-          {{- include "forgejo.validate" (dict "schema" $definitions.binding "definitions" $definitions "value" $binding "path" (printf "resolved.backup.bindings.%s" $root.Values.instance)) -}}
+          {{- include "forgejo.validate" (dict "schema" $definitions.binding "definitions" $definitions "value" $binding "path" (printf "resolved.backup.bindings.%s" $instance)) -}}
         {{- end -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
   {{- if hasKey $desired "endpoint" -}}
     {{- if or (not (hasKey $binding "endpoint")) (ne $desired.endpoint $binding.endpoint) -}}
-      {{- fail (printf "services.%s.backup.endpoint requires a matching resolved.backup.bindings.%s.endpoint" $root.Values.instance $root.Values.instance) -}}
+      {{- fail (printf "services.%s.backup.endpoint requires a matching resolved.backup.bindings.%s.endpoint" $instance $instance) -}}
     {{- end -}}
     {{- if not (hasKey $binding "repository") -}}{{- fail "The selected backup endpoint binding must supply repository" -}}{{- end -}}
   {{- end -}}
   {{- range $key := list "endpoint" "repository" "enabled" -}}
     {{- if and (hasKey $explicit $key) (hasKey $binding $key) (ne (index $explicit $key) (index $binding $key)) -}}
-      {{- fail (printf "services.%s.backup.%s conflicts with its resolved backup binding" $root.Values.instance $key) -}}
+      {{- fail (printf "services.%s.backup.%s conflicts with its resolved backup binding" $instance $key) -}}
     {{- end -}}
   {{- end -}}
   {{- if and (hasKey $binding "enabled") (not $binding.enabled) -}}

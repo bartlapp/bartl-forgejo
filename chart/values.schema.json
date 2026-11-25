@@ -4,7 +4,6 @@
   "additionalProperties": true,
   "required": [
     "installation",
-    "instance",
     "renderMode",
     "services"
   ],
@@ -15,6 +14,11 @@
       "minLength": 1,
       "maxLength": 128,
       "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
+    "deployment": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^$|^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
     },
     "instance": {
       "type": "string",
