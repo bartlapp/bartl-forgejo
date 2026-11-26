@@ -10,7 +10,7 @@ New deployment: follow the recipe below. Existing deployment: [resume access](#r
 
 ## Supported profile and release
 
-Published **0.2.2** supports Linux amd64, Kubernetes 1.30+, one application replica and native Forgejo 16.0.7 or 17.0.1. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
+Published **0.2.3** supports Linux amd64, Kubernetes 1.30+, one application replica and native Forgejo 16.0.7 or 17.0.1. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
 
 Supply the [operator tools](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#check-the-workstation), an existing version-1 installation record with complete cluster/resource references and retained access, enforced NetworkPolicy, Traefik, cert-manager and state/staging/reconstruction capacity. [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md) supplies a single-node profile; an equivalent cluster suffices. Compatible external OIDC/Restic services work without another Bartl package or company tooling.
 
