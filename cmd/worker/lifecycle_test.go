@@ -162,6 +162,30 @@ func TestReadOnlyCaptureFailurePreservesVerifiedSource(t *testing.T) {
 	}
 }
 
+func TestCaptureStagingLockFailurePreservesSourceAndRetries(t *testing.T) {
+	w := testWorker(t)
+	t.Setenv("SOURCE_STOPPED", "true")
+	lockPath := filepath.Join(w.staging, "lock")
+	if e := os.Mkdir(lockPath, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := w.run("capture"); e == nil || !w.result.SourceIntact {
+		t.Fatalf("staging-only failure invalidated source: %v %+v", e, w.result)
+	}
+	if s, e := w.cleanState(); e != nil || s.Operation != "prepared" {
+		t.Fatalf("staging lock failure changed source state: %+v %v", s, e)
+	}
+	if e := os.Remove(lockPath); e != nil {
+		t.Fatal(e)
+	}
+	if e := w.run("capture"); e != nil {
+		t.Fatalf("capture could not resume after staging fault removal: %v", e)
+	}
+	if _, e := verifyPoint(filepath.Join(w.staging, "capture"), w.id); e != nil {
+		t.Fatalf("retried capture is not usable: %v", e)
+	}
+}
+
 func TestCaptureCannotClaimIntactUnverifiedSource(t *testing.T) {
 	for _, cause := range []string{"mutation", "shutdown", "version", "missing-database"} {
 		t.Run(cause, func(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -228,6 +229,17 @@ func (w *worker) capture() error {
 	// Everything below reads the verified, gracefully stopped source and writes
 	// only staging. A capture failure here does not invalidate native state.
 	w.result.SourceIntact = true
+	// Serialize staging work only after establishing the source's condition.
+	// Failure to obtain a staging lock cannot damage the verified source.
+	stagingLock, e := os.OpenFile(filepath.Join(w.staging, "lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if e != nil {
+		return e
+	}
+	defer stagingLock.Close()
+	if e = syscall.Flock(int(stagingLock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
+		return errors.New("conflicting worker holds staging lock")
+	}
+	defer syscall.Flock(int(stagingLock.Fd()), syscall.LOCK_UN)
 	final := filepath.Join(w.staging, "capture")
 	if present, e := exists(final); e != nil {
 		return e

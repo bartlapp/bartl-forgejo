@@ -109,19 +109,6 @@ func (w *worker) run(command string) error {
 		return errors.New("conflicting worker holds state lock")
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	if command == "capture" {
-		// Serialize partial-copy reclamation with publication as well as native
-		// state writers. The source lock is always acquired first.
-		stagingLock, e := os.OpenFile(filepath.Join(w.staging, "lock"), os.O_CREATE|os.O_RDWR, 0600)
-		if e != nil {
-			return e
-		}
-		defer stagingLock.Close()
-		if e = syscall.Flock(int(stagingLock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-			return errors.New("conflicting worker holds staging lock")
-		}
-		defer syscall.Flock(int(stagingLock.Fd()), syscall.LOCK_UN)
-	}
 	switch command {
 	case "prepare":
 		return w.prepare()
