@@ -214,11 +214,6 @@ func (w *worker) capture() error {
 	if os.Getenv("SOURCE_STOPPED") != "true" {
 		return errors.New("capture requires controller-confirmed stopped application Pods")
 	}
-	if pending, e := exists(w.shutdownPath()); e != nil {
-		return e
-	} else if pending {
-		return errors.New("native graceful shutdown is unconfirmed; restart natively and stop gracefully before capture")
-	}
 	s, e := w.cleanState()
 	if e != nil {
 		return e
@@ -226,9 +221,14 @@ func (w *worker) capture() error {
 	if s.Version != w.version {
 		return errors.New("capture version does not match state")
 	}
-	// Everything below reads the verified, gracefully stopped source and writes
-	// only staging. A capture failure here does not invalidate native state.
+	// Committed owned state remains eligible for the ordinary native restart.
+	// Unconfirmed graceful shutdown blocks capture, not that restart.
 	w.result.SourceIntact = true
+	if pending, e := exists(w.shutdownPath()); e != nil {
+		return e
+	} else if pending {
+		return errors.New("native graceful shutdown is unconfirmed; restart natively and stop gracefully before capture")
+	}
 	// Serialize staging work only after establishing the source's condition.
 	// Failure to obtain a staging lock cannot damage the verified source.
 	stagingLock, e := os.OpenFile(filepath.Join(w.staging, "lock"), os.O_CREATE|os.O_RDWR, 0600)

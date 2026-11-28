@@ -134,6 +134,9 @@ func TestUncertainShutdownForbidsCaptureButAllowsRestart(t *testing.T) {
 	if e := w.capture(); e == nil || !strings.Contains(e.Error(), "shutdown is unconfirmed") {
 		t.Fatalf("uncertain native shutdown allowed capture: %v", e)
 	}
+	if !w.result.SourceIntact {
+		t.Fatal("capture refusal made committed state unavailable for its native restart")
+	}
 }
 
 func TestReadOnlyCaptureFailurePreservesVerifiedSource(t *testing.T) {
@@ -187,7 +190,7 @@ func TestCaptureStagingLockFailurePreservesSourceAndRetries(t *testing.T) {
 }
 
 func TestCaptureCannotClaimIntactUnverifiedSource(t *testing.T) {
-	for _, cause := range []string{"mutation", "shutdown", "version", "missing-database"} {
+	for _, cause := range []string{"mutation", "version", "missing-database"} {
 		t.Run(cause, func(t *testing.T) {
 			w := testWorker(t)
 			t.Setenv("SOURCE_STOPPED", "true")
@@ -195,8 +198,9 @@ func TestCaptureCannotClaimIntactUnverifiedSource(t *testing.T) {
 			switch cause {
 			case "mutation":
 				e = w.beginMutation("prepare")
-			case "shutdown":
-				e = atomicJSON(w.shutdownPath(), w.id)
+				if e == nil {
+					e = atomicJSON(w.shutdownPath(), w.id)
+				}
 			case "version":
 				w.version = "16.0.7"
 			case "missing-database":
