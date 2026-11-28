@@ -10,7 +10,7 @@ New deployment: follow the recipe below. Existing deployment: [resume access](#r
 
 ## Supported profile and release
 
-Candidate **0.3.0-dev.4** targets Linux amd64, Kubernetes 1.30+, one SQLite process and native Forgejo 16.0.7 or 17.0.1. Its image is built and pinned; standalone qualification and publication remain pending. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. An unconfirmed graceful service shutdown blocks capture, not the existing native restart of committed state. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
+Prerelease **0.3.0-dev.4** targets Linux amd64, Kubernetes 1.30+, one SQLite process and native Forgejo 16.0.7 or 17.0.1. The exercised standalone profile is accepted; its [release record](https://github.com/bartlapp/bartl-forgejo/releases/tag/v0.3.0-dev.4) binds artifact identities, direct and reused evidence, and limits. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. An unconfirmed graceful service shutdown blocks capture, not the existing native restart of committed state. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
 
 Supply the [operator tools](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#check-the-workstation), an existing version-1 installation record with complete cluster/resource references and retained access, enforced NetworkPolicy, Traefik, cert-manager and state/staging/reconstruction capacity. [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md) supplies a single-node profile; an equivalent cluster suffices. Compatible external OIDC/Restic services work without another Bartl package or company tooling.
 
@@ -20,7 +20,7 @@ Use direnv-hooked Bash and the prepared cluster directory. Equivalent external c
 cd "${WORK_DIR_ROOT:-$HOME/bartl}/acme/acme-installation/clusters/cluster-1"
 ```
 
-At the next prompt, acquire the explicitly selected prerelease once published. Until then qualification uses the retained digest-pinned chart produced by `build.sh`, not an older published chart. Package and native Forgejo versions remain separate selections:
+At the next prompt, acquire the explicitly selected prerelease. Unversioned acquisition still selects the older stable interface. Package and native Forgejo versions remain separate selections:
 
 ```bash
 set -euo pipefail
