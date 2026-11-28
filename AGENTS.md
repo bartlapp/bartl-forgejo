@@ -47,6 +47,16 @@ skopeo copy --authfile "$REGISTRY_AUTH_FILE" --preserve-digests \
 
 Verify the remote manifest against `image.digest`. Retain the unchanged chart archive, source archive/identity and checksums in the package's draft release and verify retrieval. The cluster can then pull the chart's pinned image before stable chart publication. Candidate upload does not qualify the artifact or select a stable chart.
 
+## Standalone candidate qualification
+
+Exercise the README in an operator environment without company repositories or private orchestration, using supplied cluster access, compatible external dependencies and independently retained inputs. Before publication, supply the exact archive as `BARTL_FORGEJO_CHART`. In first-installation acquisition, replace only the `helm pull` command with:
+
+```bash
+tar -xzf "$BARTL_FORGEJO_CHART" -C "$CHART_STAGE"
+```
+
+For replacement acquisition, use the same archive with `-C "$TARGET_STAGE"` instead. Keep version detection, package-entry selection and all subsequent README operations unchanged. This tests supplied candidate bytes, not public registry acquisition; verify the latter separately after publication without rebuilding.
+
 ## Maintainer qualification
 
 Offline checks: `go test ./...` and `node tests/chart.mjs`. Native recipes remain in `tests/native.sh` and `tests/native-fixture.mjs`. Cluster proof runs only on an authorized/budgeted disposable Hetzner Linux amd64 host, not the workstation.

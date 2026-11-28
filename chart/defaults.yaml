@@ -1,6 +1,6 @@
 version: "17.0.1"
 controller:
-  image: ghcr.io/bartlapp/bartl-forgejo-controller@sha256:af74372c9ffb5ac8fcde82313edc215ec39caad73dd5b5e96d257982a6db9669
+  image: ghcr.io/bartlapp/bartl-forgejo-controller@sha256:f4c3beb287fb87b963d1c2b249f612ede22c07b8076cfdbb8b158f33a1005a2f
   imagePullPolicy: IfNotPresent
   resources:
     requests:
