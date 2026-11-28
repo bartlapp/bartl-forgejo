@@ -159,7 +159,7 @@ async function install(slot, version, { backup = true, claim, stagingClaim, iden
   resource.spec.running = running;
   await kube(slot.namespace, ['create', '-f', '-'], { input: JSON.stringify(resource) });
   slot.proofValues = file;
-  await command('helm', ['upgrade', '--install', 'forgejo', chart, '--namespace', slot.namespace, '--values', slot.values, '--values', file, '--wait=legacy', '--timeout', '5m']);
+  await command('helm', ['upgrade', '--install', 'forgejo', chart, '--server-side=false', '--namespace', slot.namespace, '--values', slot.values, '--values', file, '--wait=legacy', '--timeout', '5m']);
   return app(slot);
 }
 async function stop(slot) {
@@ -795,9 +795,14 @@ async function main() {
   await caseRun('capture-and-stop-source', async () => {
     const a = await backup(blue, { final: true }); sourceSnapshot = a.status.backup.snapshot;
     await noWriters(blue);
-    await command('helm', ['upgrade', 'forgejo', chart, '--namespace', blue.namespace, '--reset-values',
+    const staticValues = JSON.parse(await readFile(blue.proofValues, 'utf8'));
+    const timeZone = a.spec.backup.timeZone === 'UTC' ? 'Etc/UTC' : 'UTC';
+    staticValues.services[a.spec.identity.instance].backup.timeZone = timeZone;
+    await privateWrite(blue.proofValues, JSON.stringify(staticValues));
+    await command('helm', ['upgrade', 'forgejo', chart, '--server-side=false', '--namespace', blue.namespace, '--reset-values',
       '--values', blue.values, '--values', blue.proofValues, '--wait=legacy', '--timeout', '5m']);
     assert.equal((await app(blue)).spec.running, false, 'same-installation static apply must preserve stop');
+    assert.equal((await app(blue)).spec.backup.timeZone, timeZone, 'changed static intent must apply without an ownership conflict');
     await kube(blue.namespace, ['rollout', 'restart', 'deployment/forgejo-controller']);
     await kube(blue.namespace, ['rollout', 'status', 'deployment/forgejo-controller', '--timeout=5m']);
     await observed(blue, 'Stopped'); await noWriters(blue);

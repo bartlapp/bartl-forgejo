@@ -446,12 +446,12 @@ helm template "$RELEASE" "$CHART" -n "$NS" -f "$VALUES" \
   kubectl --context "$KUBE_CONTEXT" create -f -
 ```
 
-The controller is installed next. Helm renders static fields, never `running`. Explicit true is new target intent, not inherited source state. If creation succeeded but installation failed, inspect that CR and release before continuing; do not replay `create`.
+The controller is installed next. Helm renders static fields, never `running`. These Helm 4 procedures explicitly use client-side updates: the precreated CR keeps independent runtime intent, and later static changes do not conflict with its original field manager. Explicit true is new target intent, not inherited source state. If creation succeeded but installation failed, inspect that CR and release before continuing; do not replay `create`.
 
 ### Install the release
 
 ```bash
-helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
+helm install "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
@@ -611,7 +611,7 @@ Monitor absent/stale/failed scheduled backups, staging capacity and required sec
 Starting condition: publication complete and no native work executing. Edit intended retained static configuration, then [prepare the chart-backed operation](#prepare-a-chart-backed-operation). Apply scheduling changes without altering native version, hostname or routing intent. Helm must preserve live runtime choice, including deliberate stop:
 
 ```bash
-helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+helm upgrade "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
 ```
@@ -705,7 +705,7 @@ BACKUP_SCHEDULE=$(cat "$SOURCE_DIR/backup-schedule-before-operation")
 export BACKUP_SCHEDULE
 yq -i '.operations.deployments[strenv(DEPLOYMENT)].ingressEnabled = false |
   .services[strenv(INSTANCE)].backup.schedule = ""' "$VALUES"
-helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+helm upgrade "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o yaml
 ```
@@ -877,7 +877,7 @@ dig @8.8.8.8 +short "$FORGEJO_HOST" A
 Run [Create the application once](#create-the-application-once) in the selected target context. This explicitly selects new running intent without inspecting or adopting a predecessor. Then install:
 
 ```bash
-helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
+helm install "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
@@ -921,7 +921,7 @@ After standalone acceptance or the coordinator's activation decision, restore th
 BACKUP_SCHEDULE=$(cat "$SOURCE_DIR/backup-schedule-before-operation")
 export BACKUP_SCHEDULE
 yq -i '.services[strenv(INSTANCE)].backup.schedule = strenv(BACKUP_SCHEDULE)' "$VALUES"
-helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+helm upgrade "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
@@ -952,7 +952,7 @@ export BACKUP_SCHEDULE SOURCE_INGRESS
 yq -i '.services[strenv(INSTANCE)].backup.schedule = strenv(BACKUP_SCHEDULE) |
   .operations.deployments[strenv(DEPLOYMENT)] =
     ((.operations.deployments[strenv(DEPLOYMENT)] | del(.ingressEnabled)) * env(SOURCE_INGRESS))' "$VALUES"
-helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+helm upgrade "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json |
   jq -e '.spec.running == false'
@@ -993,7 +993,7 @@ kubectl --context "$KUBE_CONTEXT" -n "$NS" create secret generic "$CONFIG_SECRET
   --from-file="app.ini=$INSTALL_DIR/protected/app.ini" \
   --from-file="$INSTALL_DIR/protected/client-ca/" --dry-run=client -o yaml |
   kubectl --context "$KUBE_CONTEXT" apply --server-side --field-manager=forgejo-preparation -f -
-helm upgrade "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
+helm upgrade "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" --reset-values -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
@@ -1040,7 +1040,7 @@ Never uninstall first, bypass finalizers or issue a Helm upgrade between CR dele
 For authorized reinstall after successful finalization use the same identity, claims, configuration and supplied Secrets with no competing predecessor or failed marker. First [load retained context](#load-retained-context), then [prepare the chart-backed operation](#prepare-a-chart-backed-operation); do not inspect the deliberately removed application. If configuration was lost, restore retained identity/client-CA inputs and repeat [configuration rendering](#render-configuration), not fresh key/bootstrap generation. Run [Create the application once](#create-the-application-once) to explicitly select the new CR's running intent; do not recreate storage or credentials. Then:
 
 ```bash
-helm install "$RELEASE" "$CHART" --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
+helm install "$RELEASE" "$CHART" --server-side=false --kube-context "$KUBE_CONTEXT" -n "$NS" -f "$VALUES" \
   --set-string deployment="$DEPLOYMENT" --wait=legacy --timeout=5m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=30m
 kubectl --context "$KUBE_CONTEXT" -n "$NS" get forgejoapplication/forgejo -o json | \
