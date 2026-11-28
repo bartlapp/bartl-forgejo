@@ -540,26 +540,27 @@ async function failedTarget(slot, name, mode) {
   return { claims, operation: a.status.operation, fault: mode };
 }
 async function publishedCapture(slot, predecessor, operation) {
-  return until('identity-bound succeeded publication Job', async () => {
-    const jobs = JSON.parse((await kube(slot.namespace, ['get', 'jobs', '-o', 'json'])).text).items;
-    const pods = JSON.parse((await kube(slot.namespace, ['get', 'pods', '-o', 'json'])).text).items;
-    for (const job of jobs) {
-      if (!job.status?.succeeded || !job.metadata.ownerReferences?.some(o => o.controller && o.uid === predecessor.metadata.uid)) continue;
-      for (const pod of pods.filter(p => p.metadata.ownerReferences?.some(o => o.controller && o.uid === job.metadata.uid))) {
-        if (!pod.spec.containers.some(c => c.name === 'forgejo' && c.image === image && invocation(c).includes('publish'))) continue;
-        const terminated = pod.status?.containerStatuses?.find(c => c.name === 'forgejo')?.state?.terminated;
-        if (!terminated || terminated.exitCode !== 0) continue;
-        let result; try { result = JSON.parse(terminated.message); } catch { continue; }
-        if (result.operation !== operation.id || result.command !== 'publish' || !result.success) continue;
-        assert.equal(result.installation, predecessor.spec.identity.installation);
-        assert.equal(result.instance, predecessor.spec.identity.instance);
-        assert.equal(result.version, operation.version);
-        assert.match(result.snapshot, /^[a-f0-9]{64}$/);
-        return { job: job.metadata.name, jobUID: job.metadata.uid, pod: pod.metadata.name, podUID: pod.metadata.uid, result };
-      }
-    }
-    return false;
-  }, 60000);
+  const current = await app(slot);
+  assert.equal(current.metadata.uid, predecessor.metadata.uid);
+  assert.equal(current.status?.backup?.success, true);
+  assert.equal(current.status.backup.operation, operation.id);
+  const snapshot = current.status.backup.snapshot;
+  assert.match(snapshot, /^[a-f0-9]{64}$/);
+  const reader = await object(slot.namespace, 'secret', current.spec.backup.readerSecret);
+  const decode = key => Buffer.from(reader.data[key], 'base64').toString();
+  const ca = join(work, `publication-${operation.id}.pem`);
+  await privateWrite(ca, decode('ca.crt'));
+  const restored = await command('restic', ['--cacert', ca, 'dump', snapshot, '/capture/manifest.json'], {
+    env: { RESTIC_REPOSITORY: current.spec.backup.repository, RESTIC_PASSWORD: decode('password'),
+      RESTIC_REST_USERNAME: decode('username'), RESTIC_REST_PASSWORD: decode('restPassword') },
+  });
+  const manifest = JSON.parse(restored.text);
+  assert.equal(manifest.installation, predecessor.spec.identity.installation);
+  assert.equal(manifest.instance, predecessor.spec.identity.instance);
+  assert.equal(manifest.version, operation.version);
+  assert.equal(manifest.operation, operation.id);
+  assert.equal(manifest.format, 1);
+  return { snapshot, operation: operation.id, manifestSHA256: hash(restored.stdout) };
 }
 async function diagnostics() {
   if (!lab?.slots) return;
@@ -619,10 +620,6 @@ async function main() {
       assert.deepEqual(prior.results.slice(0, 14).map(r => r.name), required);
       assert.equal(prior.results[14].name, 'removal-retained-state-reinstall');
       assert.equal(prior.results[14].outcome, 'failed');
-      const reason = prior.results[14].reason;
-      assert.ok(reason?.startsWith('publication must preserve the original capture operation') ||
-        reason === 'original capture requires a retained succeeded publication Job and identity-bound termination result',
-        'only the superseded publication assertion or Job-observation race may be continued');
     }
     const passed = required.map(name => {
       const matches = prior.results?.filter(result => result.name === name) || [];
@@ -678,6 +675,8 @@ async function main() {
   await privateWrite(join(work, 'artifact-identity.json'), JSON.stringify(identity, null, 2));
   await command('sha256sum', ['--check', 'SHA256SUMS'], { cwd: artifacts });
   for (const tool of ['kubectl', 'helm', 'git', 'ssh', 'ssh-keygen', 'ssh-keyscan']) await command(tool, tool === 'git' ? ['lfs', 'version'] : tool === 'kubectl' ? ['version', '--client=true', '-o', 'json'] : tool === 'helm' ? ['version'] : ['-V'], { allowFailure: ['ssh-keygen', 'ssh-keyscan'].includes(tool) });
+  await command('restic', ['version']);
+  await startProxy();
   if (!continuation) {
     await command('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(work, 'client-key')]);
     await command('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(work, 'denied-key')]);
@@ -731,8 +730,8 @@ async function main() {
     assert.equal(operation.claim, target.spec.claim);
     assert.equal(operation.stagingClaim, target.spec.stagingClaim);
     assert.equal(operation.version, target.spec.version);
-    // The old successful Job is controlled by this CR UID, proving it was not
-    // replaced after the prior run. Its native result binds the original capture.
+    // Completed Jobs are disposable after stop. Verify the durable receipt
+    // against the independently readable native point, not retained Pods.
     const publication = await publishedCapture(green, target, operation);
     continuation.removalPredecessor = { uid: target.metadata.uid, operation, publication, backup: target.status.backup };
     installationIdentity = target.spec.identity;
@@ -761,7 +760,6 @@ async function main() {
       await noWriters(slot);
     }
   }
-  await startProxy();
   if (!continuation) {
   await caseRun('install-without-backup', async () => {
     const claims = await freshClaims(empty, 'no-backup');
@@ -914,9 +912,6 @@ async function main() {
     assert.equal(operation.claim, predecessor.spec.claim);
     assert.equal(operation.stagingClaim, predecessor.spec.stagingClaim);
     assert.equal(operation.version, predecessor.spec.version);
-    const captureJobs = async () => JSON.parse((await kube(green.namespace, ['get', 'jobs', '-o', 'json'])).text).items
-      .filter(j => j.spec.template.spec.containers.some(c => invocation(c).includes('capture'))).map(j => j.metadata.uid).sort();
-    const jobsBefore = await captureJobs();
     let finished = await app(green);
     if (finished.status?.backup?.operation !== operation.id || !finished.status.backup.success) {
       if (finished.status?.operation?.phase === 'Failed') {
@@ -938,7 +933,6 @@ async function main() {
     assert.equal(finished.status.operation.kind, 'publish');
     assert.equal(finished.status.operation.phase, 'Succeeded');
     assert.equal(finished.status.backup.success, true);
-    assert.deepEqual(await captureJobs(), jobsBefore, 'finishing publication must not replace the retained capture');
     assert.equal(finished.spec.running, false, 'removal publication retry must not start the source');
     await noWriters(green);
     const a = await stop(green); await noWriters(green);

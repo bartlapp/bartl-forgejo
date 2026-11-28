@@ -61,6 +61,8 @@ For replacement acquisition, use the same archive with `-C "$TARGET_STAGE"` inst
 
 Offline checks: `go test ./...` and `node tests/chart.mjs`. Native recipes remain in `tests/native.sh` and `tests/native-fixture.mjs`. Cluster proof runs only on an authorized/budgeted disposable Hetzner Linux amd64 host, not the workstation.
 
+The proof host also needs native Restic 0.19.1 to read back published recovery-point manifests with scoped reader credentials. Completed Kubernetes Jobs are disposable; their retention is not an acceptance requirement.
+
 Supply fresh K3s with enforcing NetworkPolicy, Traefik/cert-manager/default filesystem storage, administrator kubeconfig, Node.js 22+, Helm supporting `--wait=legacy`, kubectl, yq v4, OpenSSL, dig, Git/LFS, OpenSSH and sha256sum. Three distinct deSEC hostnames must resolve only to the lab IPv4, with no AAAA; permit ACME HTTP, HTTPS, SSH NodePorts and pod access to the proof proxy. Setup verifies DNS and checksums Keycloak 0.8.0/Restic 0.3.0 archives. It refuses existing directories/namespaces and is not an existing-installation operator interface.
 
 When the same compatible backup fixture must serve an independent standalone target, set `BARTL_BACKUP_HOST` to a fourth distinct, authorized DNS name and supply `CLIENT_CA_BUNDLE`. Setup then uses the released Restic package's managed HTTPS route instead of its cluster-internal-only route. DNS preflight includes that name; under `acme.fke.systems` it uses LE staging and the supplied client trust. This is fixture exposure, not a Forgejo dependency on another Bartl package or permission to weaken TLS.
