@@ -334,21 +334,23 @@ Preserve keys and transport passwords. Refresh derived bindings after provider c
 
 ## Prepare native identity and configuration
 
-For a fresh installation only, create identity keys once in the empty directory. For recovery, restore the retained identity instead:
+For a fresh installation only, create identity keys once in the empty directory. `LFS_JWT_SECRET` requires 32 random bytes encoded as unpadded base64url; a hexadecimal value makes Forgejo generate a replacement key. For recovery, restore the retained identity instead:
 
 ```bash
 (
   set -o noclobber
-  for key in SECRET_KEY INTERNAL_TOKEN LFS_JWT_SECRET; do
+  for key in SECRET_KEY INTERNAL_TOKEN; do
     openssl rand -hex 32 | tr -d '\n' > "$INSTALL_DIR/protected/identity/$key"
   done
+  openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' \
+    > "$INSTALL_DIR/protected/identity/LFS_JWT_SECRET"
 )
 ```
 
 For fresh bootstrap, choose the local recovery administrator and retain its password:
 
 ```bash
-export ADMIN_USER=admin
+export ADMIN_USER=forgejo-admin
 export ADMIN_EMAIL=admin@example.org
 (
   set -o noclobber
