@@ -64,6 +64,7 @@
       }
     },
     "replicas": false,
+    "running": false,
     "version": false,
     "images": false,
     "claims": false,

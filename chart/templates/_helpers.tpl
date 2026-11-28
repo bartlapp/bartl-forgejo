@@ -31,6 +31,7 @@
   {{- if and (hasKey $schema "maxProperties") (gt (len $value) (int $schema.maxProperties)) -}}{{- fail (printf "%s has too many entries" $path) -}}{{- end -}}
   {{- $properties := $schema.properties | default dict -}}
   {{- range $key, $item := $value -}}
+    {{- if or (eq $key "running") (eq $key "replicas") -}}{{- fail (printf "%s.%s is runtime intent; patch ForgejoApplication.spec.running instead" $path $key) -}}{{- end -}}
     {{- $child := dict -}}
     {{- if hasKey $properties $key -}}
       {{- $child = index $properties $key -}}
@@ -109,7 +110,7 @@
 {{- include "forgejo.validate" (dict "schema" $definitions.service "definitions" $definitions "value" $selected "path" (printf "services.%s" $instance)) -}}
 {{- if and (hasKey $selected "release") (ne $selected.release .Chart.Version) -}}{{- fail (printf "services.%s.release selects %s but this chart is %s" $instance $selected.release .Chart.Version) -}}{{- end -}}
 {{- $service := mergeOverwrite (include "forgejo.defaults" . | fromYaml) (deepCopy $selected) -}}
-{{- range $field, $path := dict "replicas" (list "replicas") "ingressEnabled" (list "ingress" "enabled") "version" (list "version") "hostname" (list "hostname") -}}
+{{- range $field, $path := dict "ingressEnabled" (list "ingress" "enabled") "version" (list "version") "hostname" (list "hostname") -}}
   {{- if hasKey $selection.intent $field -}}
     {{- if eq (len $path) 1 -}}
       {{- $_ := set $service (first $path) (index $selection.intent $field) -}}

@@ -251,7 +251,7 @@ async function main() {
     await ksecret(namespace, 'forgejo-backup-reader', roles.reader);
     await ksecret(namespace, 'forgejo-backup-writer', roles.writer);
     const values = { installation: 'forgejo-qualification', instance: 'forgejo', services: { forgejo: {
-      hostname: slotHost, version: '16.0.7', replicas: 1, tls,
+      hostname: slotHost, version: '16.0.7', tls,
       claims: { state: 'forgejo-state', staging: 'forgejo-capture' }, configurationSecret: 'forgejo-configuration', bootstrapSecret: 'forgejo-bootstrap',
       backup: { repository: backupURL, readerSecret: 'forgejo-backup-reader', writerSecret: 'forgejo-backup-writer' },
       oidc: { issuer: oidc.issuer, name: 'Keycloak' },

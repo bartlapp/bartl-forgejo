@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha1"
+	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha2"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -210,7 +210,7 @@ func (r *Reconciler) schedule(ctx context.Context, a *api.ForgejoApplication) er
 	}
 	return r.owned(ctx, a, c, func() error {
 		p := corev1.PodSpec{ServiceAccountName: "forgejo-controller", RestartPolicy: corev1.RestartPolicyNever, Containers: []corev1.Container{{Name: "request", Image: r.Image, Command: []string{"/usr/local/bin/controller", "--request-backup"}, Env: []corev1.EnvVar{{Name: "POD_NAMESPACE", Value: a.Namespace}}, SecurityContext: &corev1.SecurityContext{RunAsNonRoot: ptr(true), RunAsUser: ptr(int64(1000)), AllowPrivilegeEscalation: ptr(false)}}}}
-		c.Spec = batchv1.CronJobSpec{Schedule: a.Spec.Backup.Schedule, Suspend: ptr(a.Spec.Replicas == 0), ConcurrencyPolicy: batchv1.ForbidConcurrent, StartingDeadlineSeconds: ptr(int64(300)), SuccessfulJobsHistoryLimit: ptr(int32(1)), FailedJobsHistoryLimit: ptr(int32(2)), JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), Template: corev1.PodTemplateSpec{Spec: p}}}}
+		c.Spec = batchv1.CronJobSpec{Schedule: a.Spec.Backup.Schedule, Suspend: ptr(!a.Spec.Running), ConcurrencyPolicy: batchv1.ForbidConcurrent, StartingDeadlineSeconds: ptr(int64(300)), SuccessfulJobsHistoryLimit: ptr(int32(1)), FailedJobsHistoryLimit: ptr(int32(2)), JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), Template: corev1.PodTemplateSpec{Spec: p}}}}
 		if a.Spec.Backup.TimeZone != "" {
 			c.Spec.TimeZone = ptr(a.Spec.Backup.TimeZone)
 		}

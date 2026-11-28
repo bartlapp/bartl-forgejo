@@ -18,7 +18,8 @@
     "intent": {
       "type": "object", "additionalProperties": true,
       "properties": {
-        "replicas": {"type": "integer", "minimum": 0, "maximum": 1},
+        "running": false,
+        "replicas": false,
         "ingressEnabled": {"type": "boolean"},
         "version": {"type": "string", "enum": ["16.0.7", "17.0.1"]},
         "hostname": {"$ref": "#/definitions/hostname"}
@@ -48,11 +49,6 @@
             "16.0.7",
             "17.0.1"
           ]
-        },
-        "replicas": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1
         },
         "claims": {
           "type": "object",

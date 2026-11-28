@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha1"
+	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha2"
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

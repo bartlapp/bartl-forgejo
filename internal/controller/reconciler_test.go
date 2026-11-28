@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha1"
+	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha2"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -22,7 +22,7 @@ import (
 func application() *api.ForgejoApplication {
 	return &api.ForgejoApplication{
 		ObjectMeta: metav1.ObjectMeta{Name: "forgejo", Namespace: "test", UID: "application", Generation: 2, Finalizers: []string{finalizer}, Annotations: map[string]string{BackupRequest: "retry"}},
-		Spec:       api.ForgejoApplicationSpec{Identity: api.Identity{Installation: "installation", Instance: "instance"}, Version: "17.0.1", Replicas: 1, Claim: "state", StagingClaim: "staging", ConfigurationSecret: "configuration", Backup: &api.BackupSpec{Repository: "rest:https://backup", ReaderSecret: "reader", WriterSecret: "writer"}},
+		Spec:       api.ForgejoApplicationSpec{Identity: api.Identity{Installation: "installation", Instance: "instance"}, Version: "17.0.1", Running: true, Claim: "state", StagingClaim: "staging", ConfigurationSecret: "configuration", Backup: &api.BackupSpec{Repository: "rest:https://backup", ReaderSecret: "reader", WriterSecret: "writer"}},
 		Status:     api.ForgejoApplicationStatus{PreparedClaim: "state", PreparedVersion: "17.0.1", LastHandledBackupRequest: "original", Operation: &api.Operation{ID: "capture-id", Kind: "publish", Phase: "Failed", Claim: "state", StagingClaim: "staging", Version: "17.0.1", Request: "original", Generation: 1}},
 	}
 }
@@ -81,6 +81,9 @@ func TestPendingPublicationRejectsTargetChangesWithoutStoppingService(t *testing
 			}
 			if c := meta.FindStatusCondition(got.Status.Conditions, "Failed"); c == nil || c.Reason != "PendingPublication" {
 				t.Fatalf("missing actionable rejection: %+v", c)
+			}
+			if c := meta.FindStatusCondition(got.Status.Conditions, "Ready"); c == nil || c.Status != metav1.ConditionFalse || c.Reason != "PendingPublication" || c.ObservedGeneration != got.Generation {
+				t.Fatalf("unapplied desired configuration certified ready: %+v", c)
 			}
 			d := &appsv1.Deployment{}
 			if e := r.Get(context.Background(), types.NamespacedName{Namespace: a.Namespace, Name: "forgejo"}, d); e != nil {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Invoke only on the authorized Hetzner host. All raw evidence stays there.
 // NODE_EXTRA_CA_CERTS=/home/runner/qualification/client-ca.pem node tests/package-proof.mjs --lab /home/runner/qualification/lab.json \
-//   --chart /srv/retained/candidate/bartl-forgejo-0.2.3.tgz \
+//   --chart /srv/retained/candidate/bartl-forgejo-CANDIDATE_VERSION.tgz \
 //   --artifacts /srv/retained/candidate --work /home/runner/package-proof-01
 // Continuation: add --continue-from /absolute/original-work and optionally
 // --malformed-from /absolute/malformed-work, always with a fresh --work.
@@ -115,10 +115,10 @@ async function slotIngress(slot, values) {
   return { ...service.ingress, host: slot.host };
 }
 async function start(slot) {
-  await patch(slot, { replicas: 1, ingress: await slotIngress(slot) });
+  await patch(slot, { running: true, ingress: await slotIngress(slot) });
   return observed(slot, 'Ready');
 }
-async function install(slot, version, { backup = true, claim, stagingClaim, identity } = {}) {
+async function install(slot, version, { backup = true, claim, stagingClaim, identity, running = true } = {}) {
   const values = JSON.parse(await readFile(slot.values, 'utf8'));
   identity ||= installationIdentity;
   if (!identity) {
@@ -127,7 +127,7 @@ async function install(slot, version, { backup = true, claim, stagingClaim, iden
     identity = { installation: `${declared.installation}-${runID}`, instance: `${declared.instance}-${runID}` };
   }
   const selected = slot.instance || 'forgejo';
-  const service = { ...values.services[selected], version, replicas: 1,
+  const service = { ...values.services[selected], version,
     ...(claim ? { claims: { state: claim, staging: stagingClaim } } : {}) };
   service.backup = backup
     ? { ...service.backup, enabled: true, repository: `rest:https://${lab.proxyHost}:${proxy.address().port}${lab.backup.repositoryPath}` }
@@ -143,11 +143,27 @@ async function install(slot, version, { backup = true, claim, stagingClaim, iden
   }
   const file = join(work, `${slot.namespace}-${++seq}-values.json`);
   await privateWrite(file, JSON.stringify(override));
+  const crds = await command('helm', ['show', 'crds', chart]);
+  await kube(null, ['apply', '--server-side', '--field-manager=forgejo-crd', '-f', '-'], { input: crds.stdout });
+  await kube(null, ['wait', 'crd/forgejoapplications.forgejo.bartl.sh', '--for=condition=Established', '--timeout=1m']);
+  const rendered = await command('helm', ['template', 'forgejo', chart, '--namespace', slot.namespace,
+    '--values', slot.values, '--values', file, '--show-only', 'templates/application.yaml']);
+  const parsed = await command('yq', ['-o=json', '.'], { input: rendered.stdout });
+  const resource = JSON.parse(parsed.text);
+  assert.equal(resource.apiVersion, 'forgejo.bartl.sh/v1alpha2');
+  assert.equal(Object.hasOwn(resource.spec, 'running'), false, 'Helm must not own runtime intent');
+  assert.equal(Object.hasOwn(resource.spec, 'replicas'), false, 'SQLite has no replica control');
+  resource.metadata.labels = { ...resource.metadata.labels, 'app.kubernetes.io/managed-by': 'Helm' };
+  resource.metadata.annotations = { ...resource.metadata.annotations,
+    'meta.helm.sh/release-name': 'forgejo', 'meta.helm.sh/release-namespace': slot.namespace };
+  resource.spec.running = running;
+  await kube(slot.namespace, ['create', '-f', '-'], { input: JSON.stringify(resource) });
+  slot.proofValues = file;
   await command('helm', ['upgrade', '--install', 'forgejo', chart, '--namespace', slot.namespace, '--values', slot.values, '--values', file, '--wait=legacy', '--timeout', '5m']);
   return app(slot);
 }
 async function stop(slot) {
-  await patch(slot, { replicas: 0, ingress: { enabled: false } });
+  await patch(slot, { running: false });
   return observed(slot, 'Stopped');
 }
 async function noWriters(slot, interval = 4000) {
@@ -397,31 +413,50 @@ async function verify(e, stage, version) {
   await request(e, `${repoPath(e)}/issues`, { method: 'POST', expected: [201], body: { title: `${stage} new work` } });
   await request(e, `/api/packages/${e.username}/generic/package-proof/${stage}/proof.txt`, { method: 'PUT', expected: [201], body: fixtureBytes, headers: { 'Content-Type': 'application/octet-stream' } });
 }
-async function backup(slot, { success = true, request } = {}) {
+async function backup(slot, { success = true, request, final = false } = {}) {
   request ||= `proof-${Date.now()}-${randomBytes(4).toString('hex')}`;
-  const started = performance.now(); let unavailableAt, availableAt, previousAvailableAt = started, maximumSampleGapMs = 0, previousSample = started;
+  const expectedRunning = !final && (await app(slot)).spec.running;
+  const started = performance.now(); let unavailableAt, availableAt, previousAvailableAt = started, maximumSampleGapMs = 0, previousSample = started, servingDrained = false;
   async function availability() {
     const pods = JSON.parse((await kube(slot.namespace, ['get', 'pods', '-o', 'json'])).text).items;
     const now = performance.now();
     maximumSampleGapMs = Math.max(maximumSampleGapMs, now - previousSample); previousSample = now;
     const ready = pods.some(p => !p.metadata.deletionTimestamp && p.spec.containers.some(c => invocation(c).includes('serve')) && p.status.conditions?.some(c => c.type === 'Ready' && c.status === 'True'));
+    const serving = pods.some(p => p.spec.containers.some(c => invocation(c).includes('serve')) &&
+      !['Succeeded', 'Failed'].includes(p.status.phase));
+    if (!expectedRunning) {
+      if (servingDrained) assert.equal(serving, false, 'final capture/publication must not recreate even an unready serving Pod');
+      if (!serving) servingDrained = true;
+    }
+    if (!expectedRunning && unavailableAt !== undefined) assert.equal(ready, false, 'stopped capture/publication must never restart a writer');
     if (!ready && unavailableAt === undefined) unavailableAt = now;
     if (ready && unavailableAt === undefined) previousAvailableAt = now;
     if (ready && unavailableAt !== undefined && availableAt === undefined) availableAt = now;
     return ready;
   }
-  await kube(slot.namespace, ['annotate', 'forgejoapplication', 'forgejo', `forgejo.bartl.sh/backup-request=${request}`, '--overwrite']);
+  if (final) {
+    await kube(slot.namespace, ['patch', 'forgejoapplication', 'forgejo', '--type=merge', '-p',
+      JSON.stringify({ metadata: { annotations: { 'forgejo.bartl.sh/backup-request': request } }, spec: { running: false } })]);
+  } else {
+    await kube(slot.namespace, ['annotate', 'forgejoapplication', 'forgejo', `forgejo.bartl.sh/backup-request=${request}`, '--overwrite']);
+  }
   const a = await until(`backup ${request}`, async () => {
     await availability(); const a = await app(slot); requireNonfailed(a, `backup ${request}`);
     return a.status?.backup?.request === request && a;
   });
-  await until('service Ready following capture/publication', async () => {
-    requireNonfailed(await app(slot), 'service Ready following capture/publication');
-    return availability();
-  });
+  if (expectedRunning) {
+    await until('service Ready following capture/publication', async () => {
+      requireNonfailed(await app(slot), 'service Ready following capture/publication');
+      return availability();
+    });
+  } else {
+    await observed(slot, 'Stopped');
+    await noWriters(slot);
+    assert.equal((await app(slot)).spec.running, false, 'publication must preserve stopped intent');
+  }
   timings.push({ kind: 'backup', namespace: slot.namespace, request, totalMs: Math.round(performance.now() - started),
-    observedServiceInterruptionMs: unavailableAt === undefined ? null : Math.round(availableAt - unavailableAt),
-    interruptionUpperBoundMs: unavailableAt === undefined ? null : Math.round(availableAt - previousAvailableAt),
+    observedServiceInterruptionMs: unavailableAt === undefined || availableAt === undefined ? null : Math.round(availableAt - unavailableAt),
+    interruptionUpperBoundMs: unavailableAt === undefined || availableAt === undefined ? null : Math.round(availableAt - previousAvailableAt),
     maximumSampleGapMs: Math.round(maximumSampleGapMs), basis: 'actual serving pod Ready observations; polling bounds, fixture scale only' });
   emit('timing', timings.at(-1));
   assert.equal(a.status.backup.success, success, JSON.stringify(a.status));
@@ -666,7 +701,7 @@ async function main() {
       assert.equal(a.spec.claim, evidence.claims.claim, 'continued state claim must match prior evidence');
       assert.equal(a.spec.stagingClaim, evidence.claims.stagingClaim, 'continued staging claim must match prior evidence');
       assert.equal(a.status?.backup?.snapshot, evidence.newPoint.snapshot, 'continued backup must match prior evidence');
-      assert.equal(a.spec.replicas, 0, 'continued slots must already be stopped');
+      assert.equal(a.spec.running, false, 'continued slots must already be stopped');
       assert.ok(condition(a, 'Stopped') && a.status?.observedGeneration === a.metadata.generation,
         'continued slots must have observed their stopped intent');
       await noWriters(slot);
@@ -702,13 +737,19 @@ async function main() {
     continuation.removalPredecessor = { uid: target.metadata.uid, operation, publication, backup: target.status.backup };
     installationIdentity = target.spec.identity;
     missingBootstrap.add(green.namespace);
-    assert.equal(source.spec.replicas, 0);
+    assert.equal(source.spec.running, false);
     await observed(blue, 'Stopped'); await noWriters(blue);
   }
   // Drain existing declared installations through their finalizers. Keep every
   // old claim and its diagnostics; each new run receives independent claims.
   const forgejoAPI = (await command('kubectl', ['get', 'crd',
     'forgejoapplications.forgejo.bartl.sh', '--ignore-not-found', '-o', 'name'])).text;
+  if (forgejoAPI) {
+    const definition = JSON.parse((await command('kubectl', ['get', 'crd',
+      'forgejoapplications.forgejo.bartl.sh', '-o', 'json'])).text);
+    assert.ok(definition.spec.versions.some(v => v.name === 'v1alpha2' && v.served && v.storage),
+      'qualification requires a fresh/current v1alpha2 API, not migration or adoption of an older management API');
+  }
   for (const slot of continuation ? [empty] : [blue, green, empty]) {
     const existing = forgejoAPI
       ? await kube(slot.namespace, ['get', 'forgejoapplication', 'forgejo', '--ignore-not-found', '-o', 'json'])
@@ -722,7 +763,19 @@ async function main() {
   }
   await startProxy();
   if (!continuation) {
-  await caseRun('install-without-backup', async () => { const claims = await freshClaims(empty, 'no-backup'); await install(empty, '17.0.1', { ...claims, backup: false }); await observed(empty, 'Ready'); const e = await endpoint(empty); try { assert.ok((await request(e, '/api/v1/version')).version.startsWith('17.0.1')); } finally { await closeChild(e.child); } return remove(empty); });
+  await caseRun('install-without-backup', async () => {
+    const claims = await freshClaims(empty, 'no-backup');
+    await install(empty, '17.0.1', { ...claims, backup: false, running: false });
+    const stopped = await observed(empty, 'Stopped'); await noWriters(empty);
+    const jobs = JSON.parse((await kube(empty.namespace, ['get', 'jobs', '-o', 'json'])).text).items;
+    assert.equal(jobs.some(j => j.metadata.ownerReferences?.some(o => o.uid === stopped.metadata.uid)), false,
+      'a new stopped instance must not initialize native state');
+    await start(empty);
+    const e = await endpoint(empty);
+    try { assert.ok((await request(e, '/api/v1/version')).version.startsWith('17.0.1')); }
+    finally { await closeChild(e.child); }
+    return remove(empty);
+  });
   await caseRun('configured-empty-repository', async () => { const claims = await freshClaims(empty, 'empty-store'); await install(empty, '17.0.1', claims); const a = await observed(empty, 'Ready'); const e = await endpoint(empty); try { assert.ok((await request(e, '/api/v1/version')).version.startsWith('17.0.1')); } finally { await closeChild(e.child); } await remove(empty); return { claims, status: a.status }; });
   await caseRun('native-old-source-fixture', async () => { const claims = await freshClaims(blue, 'source'); await install(blue, '16.0.7', claims); const a = await observed(blue, 'Ready'); const e = await endpoint(blue); try { hostKey = await hostIdentity(e); await configureOIDC(e); await seed(e); } finally { await closeChild(e.child); } return { claim: a.spec.claim, hostKey }; });
   await caseRun('existing-restart-backup-inaccessible', async () => {
@@ -741,7 +794,25 @@ async function main() {
     } finally { await patchSecret(blue.namespace, reader.metadata.name, saved); }
   });
   let sourceSnapshot;
-  await caseRun('capture-and-stop-source', async () => { const a = await backup(blue); sourceSnapshot = a.status.backup.snapshot; await stop(blue); await noWriters(blue); return { snapshot: sourceSnapshot, claim: a.spec.claim }; });
+  await caseRun('capture-and-stop-source', async () => {
+    const a = await backup(blue, { final: true }); sourceSnapshot = a.status.backup.snapshot;
+    await noWriters(blue);
+    await command('helm', ['upgrade', 'forgejo', chart, '--namespace', blue.namespace, '--reset-values',
+      '--values', blue.values, '--values', blue.proofValues, '--wait=legacy', '--timeout', '5m']);
+    assert.equal((await app(blue)).spec.running, false, 'same-installation static apply must preserve stop');
+    await kube(blue.namespace, ['rollout', 'restart', 'deployment/forgejo-controller']);
+    await kube(blue.namespace, ['rollout', 'status', 'deployment/forgejo-controller', '--timeout=5m']);
+    await observed(blue, 'Stopped'); await noWriters(blue);
+    // Before any target exists, abandoning a switch is an ordinary explicit start.
+    await start(blue);
+    const e = await endpoint(blue);
+    try { await hostIdentity(e, hostKey); assert.ok((await request(e, '/api/v1/version')).version.startsWith('16.0.7')); }
+    finally { await closeChild(e.child); }
+    await stop(blue); await noWriters(blue);
+    const stoppedCapture = await backup(blue, { final: true });
+    sourceSnapshot = stoppedCapture.status.backup.snapshot;
+    return { snapshot: sourceSnapshot, claim: a.spec.claim, durableStop: true, explicitSourceResume: true };
+  });
   await caseRun('native-old-to-new-independent-pvc', async () => {
     const values = JSON.parse(await readFile(green.values, 'utf8')).services[green.instance || 'forgejo'];
     assert.ok(values.bootstrapSecret, 'configured green bootstrap Secret must be named');
@@ -760,21 +831,24 @@ async function main() {
     const a = await app(green), writer = await object(green.namespace, 'secret', a.spec.backup.writerSecret), saved = writer.data;
     await patchSecret(green.namespace, writer.metadata.name, { restPassword: Buffer.from(randomBytes(24).toString('hex')).toString('base64') });
     let failed;
-    try { failed = await backup(green, { success: false }); await observed(green, 'Ready'); assert.ok(condition(failed, 'BackupFailed')); }
+    try { failed = await backup(green, { success: false, final: true }); await observed(green, 'Stopped'); assert.ok(condition(failed, 'BackupFailed')); }
     finally { await patchSecret(green.namespace, writer.metadata.name, saved); }
     const jobsBefore = JSON.parse((await kube(green.namespace, ['get', 'jobs', '-o', 'json'])).text).items.filter(j => j.spec.template.spec.containers.some(c => invocation(c).includes('capture'))).map(j => j.metadata.uid);
     const resumed = await backup(green); assert.equal(resumed.status.backup.operation, failed.status.backup.operation, 'publication retry must retain original capture operation');
     const jobsAfter = JSON.parse((await kube(green.namespace, ['get', 'jobs', '-o', 'json'])).text).items.filter(j => j.spec.template.spec.containers.some(c => invocation(c).includes('capture'))).map(j => j.metadata.uid);
     assert.deepEqual(jobsAfter, jobsBefore, 'publication retry must not create a replacement capture');
+    await noWriters(green);
+    assert.equal(resumed.spec.running, false);
+    await start(green);
     return { failed: failed.status.backup, resumed: resumed.status.backup };
   });
   await caseRun('same-version-replacement-new-backup', async () => {
-    const point = (await backup(green)).status.backup; await stop(green); await noWriters(green);
+    const point = (await backup(green, { final: true })).status.backup; await noWriters(green);
     await remove(blue); const claims = await freshClaims(blue, 'same-version'), started = performance.now(); await install(blue, '17.0.1', claims); const restored = await observed(blue, 'Ready');
     timings.push({ kind: 'same-version-restore', namespace: blue.namespace, installToReadyMs: Math.round(performance.now() - started), version: '17.0.1' }); emit('timing', timings.at(-1));
     const e = await endpoint(blue); try { await hostIdentity(e, hostKey); await verify(e, 'same-version', '17.0.1'); } finally { await closeChild(e.child); }
-    const newPoint = (await backup(blue)).status.backup; assert.notEqual(newPoint.snapshot, point.snapshot); await noWriters(green);
-    await stop(blue); await noWriters(blue);
+    const newPoint = (await backup(blue, { final: true })).status.backup; assert.notEqual(newPoint.snapshot, point.snapshot); await noWriters(green);
+    await noWriters(blue);
     return { point, restored: restored.status, newPoint, claims };
   });
   await caseRun('same-version-blue-to-green-independent-pvc', async () => {
@@ -785,8 +859,8 @@ async function main() {
     assert.deepEqual(source.spec.identity, target.spec.identity);
     assert.notEqual((await object(blue.namespace, 'pvc', source.spec.claim)).metadata.uid, (await object(green.namespace, 'pvc', target.spec.claim)).metadata.uid);
     const e = await endpoint(green); try { await hostIdentity(e, hostKey); await verify(e, 'blue-to-green', '17.0.1'); } finally { await closeChild(e.child); }
-    const newPoint = (await backup(green)).status.backup; assert.notEqual(newPoint.snapshot, point.snapshot);
-    await stop(green); await noWriters(blue); await noWriters(green);
+    const newPoint = (await backup(green, { final: true })).status.backup; assert.notEqual(newPoint.snapshot, point.snapshot);
+    await noWriters(blue); await noWriters(green);
     return { point, claims, newPoint };
   });
   await caseRun('native-downgrade-rejected-without-state-change', async () => {
@@ -801,7 +875,7 @@ async function main() {
     } finally { await closeChild(e.child); }
     await stop(empty); await noWriters(empty);
     const before = await readOnlyStateDigest(empty, claims.claim);
-    await patch(empty, { version: '16.0.7', replicas: 1, ingress: await slotIngress(empty) });
+    await patch(empty, { version: '16.0.7', running: true, ingress: await slotIngress(empty) });
     const failed = await observed(empty, 'Failed');
     assert.equal(condition(failed, 'Ready'), false, 'downgrade must not become Ready');
     await noWriters(empty);
@@ -826,7 +900,7 @@ async function main() {
       const a = await app(green); requireNonfailed(a, 'publication readback barrier');
       return a.status?.operation?.kind === 'publish' && fault.hits > 0;
     });
-    await patch(green, { replicas: 0, ingress: { enabled: false } });
+    await patch(green, { running: false });
     setFault('normal'); const a = await observed(green, 'Stopped'); await noWriters(green, 10000); return { status: a.status };
   });
   }
@@ -843,14 +917,13 @@ async function main() {
     const captureJobs = async () => JSON.parse((await kube(green.namespace, ['get', 'jobs', '-o', 'json'])).text).items
       .filter(j => j.spec.template.spec.containers.some(c => invocation(c).includes('capture'))).map(j => j.metadata.uid).sort();
     const jobsBefore = await captureJobs();
-    await start(green);
     let finished = await app(green);
     if (finished.status?.backup?.operation !== operation.id || !finished.status.backup.success) {
       if (finished.status?.operation?.phase === 'Failed') {
         const finishRequest = `before-removal-${Date.now()}-${randomBytes(4).toString('hex')}`;
         finished = await backup(green, { request: finishRequest });
       } else if (!continuation?.removalOnly) {
-        finished = await until('original capture publication after start', async () => {
+        finished = await until('original capture publication while stopped', async () => {
           const current = await app(green); requireNonfailed(current, 'original capture publication');
           return current.status?.backup?.operation === operation.id && current.status.backup.success && current;
         });
@@ -866,12 +939,14 @@ async function main() {
     assert.equal(finished.status.operation.phase, 'Succeeded');
     assert.equal(finished.status.backup.success, true);
     assert.deepEqual(await captureJobs(), jobsBefore, 'finishing publication must not replace the retained capture');
+    assert.equal(finished.spec.running, false, 'removal publication retry must not start the source');
+    await noWriters(green);
     const a = await stop(green); await noWriters(green);
     const retained = await remove(green);
     await install(green, '17.0.1', { claim: a.spec.claim, stagingClaim: a.spec.stagingClaim }); await observed(green, 'Ready');
     const e = await endpoint(green); try { await hostIdentity(e, hostKey); await verify(e, 'reinstall', '17.0.1'); } finally { await closeChild(e.child); }
     const requestID = `reinstall-${Date.now()}-${randomBytes(4).toString('hex')}`;
-    const published = await backup(green, { request: requestID });
+    const published = await backup(green, { request: requestID, final: true });
     assert.equal(published.status.backup.request, requestID);
     assert.equal(published.status.operation.kind, 'publish');
     assert.equal(published.status.operation.phase, 'Succeeded');

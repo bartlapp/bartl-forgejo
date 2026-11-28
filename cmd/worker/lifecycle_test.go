@@ -136,6 +136,58 @@ func TestUncertainShutdownForbidsCaptureButAllowsRestart(t *testing.T) {
 	}
 }
 
+func TestReadOnlyCaptureFailurePreservesVerifiedSource(t *testing.T) {
+	w := testWorker(t)
+	t.Setenv("SOURCE_STOPPED", "true")
+	before, e := inventory(w.data)
+	if e != nil {
+		t.Fatal(e)
+	}
+	// A retained partial capture prevents staging creation without touching state.
+	if e := os.Mkdir(filepath.Join(w.staging, "capture-in-progress"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := w.capture(); e == nil {
+		t.Fatal("capture unexpectedly overwrote partial evidence")
+	}
+	if !w.result.SourceIntact {
+		t.Fatal("verified read-only source was reported as uncertain")
+	}
+	after, e := inventory(w.data)
+	if e != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("capture failure changed source: %v", e)
+	}
+	if _, e := w.cleanState(); e != nil {
+		t.Fatalf("capture failure invalidated native restart: %v", e)
+	}
+}
+
+func TestCaptureCannotClaimIntactUnverifiedSource(t *testing.T) {
+	for _, cause := range []string{"mutation", "shutdown", "version", "missing-database"} {
+		t.Run(cause, func(t *testing.T) {
+			w := testWorker(t)
+			t.Setenv("SOURCE_STOPPED", "true")
+			var e error
+			switch cause {
+			case "mutation":
+				e = w.beginMutation("prepare")
+			case "shutdown":
+				e = atomicJSON(w.shutdownPath(), w.id)
+			case "version":
+				w.version = "16.0.7"
+			case "missing-database":
+				e = os.Remove(filepath.Join(w.data, "data/forgejo.db"))
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e := w.capture(); e == nil || w.result.SourceIntact {
+				t.Fatalf("unverified source allowed: error=%v intact=%v", e, w.result.SourceIntact)
+			}
+		})
+	}
+}
+
 func TestNativeLifecycleHelper(t *testing.T) {
 	mode := os.Getenv("BARTL_NATIVE_TEST")
 	if mode == "" {
@@ -486,6 +538,89 @@ func TestNativeTrustVerifiesTLS(t *testing.T) {
 				}
 			} else if err == nil || !strings.Contains(string(output), tc.wantError) {
 				t.Fatalf("wanted TLS refusal containing %q, got %v: %s", tc.wantError, err, output)
+			}
+		})
+	}
+}
+
+func TestOwnedPartialCaptureRetriesAfterWriteFault(t *testing.T) {
+	if os.Getenv("BARTL_CAPTURE_WRITE_FAULT") != "true" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestOwnedPartialCaptureRetriesAfterWriteFault$")
+		cmd.Env = append(os.Environ(), "BARTL_CAPTURE_WRITE_FAULT=true")
+		if out, e := cmd.CombinedOutput(); e != nil {
+			t.Fatalf("capture write-fault subprocess: %v\n%s", e, out)
+		}
+		return
+	}
+	w := testWorker(t)
+	t.Setenv("SOURCE_STOPPED", "true")
+	if e := os.WriteFile(filepath.Join(w.data, "data/forgejo.db"), bytes.Repeat([]byte("d"), 8192), 0600); e != nil {
+		t.Fatal(e)
+	}
+	before, e := inventory(w.data)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var limit syscall.Rlimit
+	if e := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &limit); e != nil {
+		t.Fatal(e)
+	}
+	signal.Ignore(syscall.SIGXFSZ)
+	if e := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 2048, Max: limit.Max}); e != nil {
+		t.Fatal(e)
+	}
+	e = w.run("capture")
+	if restoreErr := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limit); restoreErr != nil {
+		t.Fatal(restoreErr)
+	}
+	if e == nil || !w.result.SourceIntact {
+		t.Fatalf("write fault did not retain intact-source distinction: %v %+v", e, w.result)
+	}
+	var partial manifest
+	if e := readJSON(filepath.Join(w.staging, "capture-in-progress/manifest.json"), &partial); e != nil || partial.Operation != w.operation || partial.identity != w.id {
+		t.Fatalf("failed copy lacks owned manifest: %v %+v", e, partial)
+	}
+	if _, e := w.cleanState(); e != nil {
+		t.Fatalf("explicit native restart lost its usable source: %v", e)
+	}
+	after, e := inventory(w.data)
+	if e != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("capture failure changed native state: %v", e)
+	}
+	w.operation = "subsequent-capture"
+	w.result = result{}
+	if e := w.run("capture"); e != nil {
+		t.Fatalf("ordinary retry on same staging failed after fault removal: %v", e)
+	}
+	point, e := verifyPoint(filepath.Join(w.staging, "capture"), w.id)
+	if e != nil || point.Operation != w.operation || w.result.Capture != w.operation {
+		t.Fatalf("same-staging retry did not produce new complete capture: %v %+v", e, point)
+	}
+}
+
+func TestCaptureProtectsForeignPartialAndCompleteCapture(t *testing.T) {
+	for _, kind := range []string{"foreign-partial", "protected-complete"} {
+		t.Run(kind, func(t *testing.T) {
+			w := testWorker(t)
+			t.Setenv("SOURCE_STOPPED", "true")
+			root := filepath.Join(w.staging, "capture-in-progress")
+			if kind == "protected-complete" {
+				root = filepath.Join(w.staging, "capture")
+			}
+			foreign := manifest{state: state{identity{"foreign", "instance"}, w.version, "old-operation"}, Format: 1}
+			if e := atomicJSON(filepath.Join(root, "manifest.json"), foreign); e != nil {
+				t.Fatal(e)
+			}
+			before, e := inventory(root)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e := w.run("capture"); e == nil {
+				t.Fatal("capture removed protected or foreign staging")
+			}
+			after, e := inventory(root)
+			if e != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("protected staging changed: %v", e)
 			}
 		})
 	}

@@ -12,7 +12,7 @@ spec:
     kind: ForgejoApplication
     shortNames: [forgejoapp]
   versions:
-    - name: v1alpha1
+    - name: v1alpha2
       served: true
       storage: true
       subresources:
@@ -22,8 +22,8 @@ spec:
           type: string
           jsonPath: .spec.version
         - name: Intent
-          type: integer
-          jsonPath: .spec.replicas
+          type: boolean
+          jsonPath: .spec.running
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -33,7 +33,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [identity, version, replicas, claim, stagingClaim, configurationSecret, ingress, ssh]
+              required: [identity, version, claim, stagingClaim, configurationSecret, ingress, ssh]
               x-kubernetes-validations:
                 - rule: self.claim != self.stagingClaim
                   message: State and capture claims must be distinct
@@ -49,9 +49,9 @@ spec:
                 version:
                   type: string
                   enum: ["16.0.7", "17.0.1"]
-                replicas:
-                  type: integer
-                  enum: [0, 1]
+                running:
+                  type: boolean
+                  default: true
                 claim: {type: string, minLength: 1}
                 stagingClaim: {type: string, minLength: 1}
                 configurationSecret: {type: string, minLength: 1}
@@ -115,6 +115,7 @@ spec:
                     message: {type: string}
                     jobCreated: {type: boolean}
                     jobUID: {type: string}
+                    sourceIntact: {type: boolean}
                 backup:
                   type: object
                   properties:

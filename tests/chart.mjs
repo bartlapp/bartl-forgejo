@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const chart = process.env.FORGEJO_CHART || fileURLToPath(new URL('../chart', import.meta.url));
+const metadata = spawnSync(process.env.HELM || 'helm', ['show', 'chart', chart], {encoding: 'utf8'});
+assert.equal(metadata.status, 0, metadata.stderr);
+const version = /^version:\s*"?([^"\s]+)"?$/m.exec(metadata.stdout)?.[1];
+assert.ok(version, 'selected chart must declare its version');
 function render(values, {mode = 'deployment', release = 'forgejo', namespace = 'default', deployment} = {}) {
   const args = ['template', release, chart, '-n', namespace, '-f', '-', '--set-string', `renderMode=${mode}`];
   if (deployment) args.push('--set-string', `deployment=${deployment}`);
@@ -33,11 +37,15 @@ check('shared file selects only this independent release', () => {
   assert.deepEqual(app.identity, {installation: 'acme', instance: 'forgejo'});
   assert.equal(app.version, '17.0.1'); assert.equal(app.claim, 'forgejo-state'); assert.equal(app.stagingClaim, 'forgejo-capture');
   assert.equal(app.ingress.host, 'forgejo.acme.example');
+  const resource = docs(v).find(d => d.kind === 'ForgejoApplication');
+  assert.equal(resource.apiVersion, 'forgejo.bartl.sh/v1alpha2');
+  assert.equal(Object.hasOwn(app, 'running'), false);
+  assert.equal(Object.hasOwn(app, 'replicas'), false);
   assert.equal(docs(v).some(d => d.kind === 'Secret'), false);
 });
-check('custom identity and map overrides retain defaults and explicit zero/false', () => {
-  const v = base(); v.instance = 'git'; v.services = {forgejo: 'ignored', git: {replicas: 0, claims: {state: 'git-state'}, ingress: {enabled: false}, controller: {imagePullPolicy: 'Always', resources: {requests: {cpu: '40m'}}}}};
-  const app = spec(v); assert.equal(app.identity.instance, 'git'); assert.equal(app.replicas, 0); assert.equal(app.claim, 'git-state'); assert.equal(app.stagingClaim, 'forgejo-capture'); assert.equal(app.ingress.enabled, false);
+check('custom identity and map overrides retain defaults and explicit false', () => {
+  const v = base(); v.instance = 'git'; v.services = {forgejo: 'ignored', git: {claims: {state: 'git-state'}, ingress: {enabled: false}, controller: {imagePullPolicy: 'Always', resources: {requests: {cpu: '40m'}}}}};
+  const app = spec(v); assert.equal(app.identity.instance, 'git'); assert.equal(Object.hasOwn(app, 'running'), false); assert.equal(app.claim, 'git-state'); assert.equal(app.stagingClaim, 'forgejo-capture'); assert.equal(app.ingress.enabled, false);
   const container = docs(v).find(d => d.kind === 'Deployment').spec.template.spec.containers[0];
   assert.equal(container.resources.requests.cpu, '40m'); assert.equal(container.resources.requests.memory, '64Mi'); assert.equal(container.imagePullPolicy, 'Always');
 });
@@ -126,18 +134,18 @@ check('native SSH Service exposes only serving pods and advertises explicit Node
   delete service(v).ssh.nodePort; rejects(v); service(v).ssh = {nodePort: 30222}; rejects(v);
 });
 check('exact release consistency remains valid for standalone instance selection', () => {
-  const v = base(); service(v).release = '0.2.3'; spec(v); declaration(v); configuration(v);
-  service(v).release = '0.1.0'; for (const mode of ['deployment', 'connections', 'configuration']) rejects(v, {mode});
+  const v = base(); service(v).release = version; spec(v); declaration(v); configuration(v);
+  service(v).release = '0.0.0-incompatible'; for (const mode of ['deployment', 'connections', 'configuration']) rejects(v, {mode});
 });
 check('selected deployment resolves its own instance, intent and all renders', () => {
   const v = base(); v.deployment = 'target';
   v.deployments = {target: {instance: 'git', namespace: 'green', release: 'git-target', package: 'new'}, source: {instance: 'git', namespace: 'blue', release: 'git-source', package: 'old'}};
-  v.packages = {new: {version: '0.2.3'}, old: {version: '0.2.3'}};
-  v.services = {forgejo: {unknown: 'ignored'}, git: {replicas: 1, version: '16.0.7', ingress: {enabled: true}, hostname: 'source.example', backup: {enabled: false}}};
-  v.operations = {deployments: {target: {replicas: 0, ingressEnabled: false, version: '17.0.1', hostname: 'target.example'}, source: {replicas: 1, ingressEnabled: true, version: '16.0.7', hostname: 'source.example'}}};
+  v.packages = {new: {version}, old: {version}};
+  v.services = {forgejo: {unknown: 'ignored'}, git: {version: '16.0.7', ingress: {enabled: true}, hostname: 'source.example', backup: {enabled: false}}};
+  v.operations = {deployments: {target: {ingressEnabled: false, version: '17.0.1', hostname: 'target.example'}, source: {ingressEnabled: true, version: '16.0.7', hostname: 'source.example'}}};
   const app = spec(v);
   assert.deepEqual(app.identity, {installation: 'acme', instance: 'git'});
-  assert.equal(app.replicas, 0); assert.equal(app.ingress.enabled, false); assert.equal(app.version, '17.0.1'); assert.equal(app.ingress.host, 'target.example');
+  assert.equal(Object.hasOwn(app, 'running'), false); assert.equal(Object.hasOwn(app, 'replicas'), false); assert.equal(app.ingress.enabled, false); assert.equal(app.version, '17.0.1'); assert.equal(app.ingress.host, 'target.example');
   assert.equal(declaration(v).services.git.endpoints.https.url, 'https://target.example');
   assert.ok(configuration(v).appIni.includes('ROOT_URL = https://target.example/'));
   v.deployment = 'source'; assert.equal(spec(v).version, '16.0.7'); assert.equal(spec(v).ingress.host, 'source.example');
@@ -147,7 +155,7 @@ check('selected deployment resolves its own instance, intent and all renders', (
 check('selected nondefault identity uses only its OIDC and backup bindings', () => {
   const v = base(); v.deployment = 'target';
   v.deployments = {target: {instance: 'git', namespace: 'green', release: 'git-target', package: 'new'}};
-  v.packages = {new: {version: '0.2.3'}};
+  v.packages = {new: {version}};
   v.services = {forgejo: {unknown: true}, git: {identityProvider: 'accounts', backup: {endpoint: 'archive'}}};
   v.resolved = {
     oidc: {bindings: {forgejo: {provider: 'wrong'}, git: {provider: 'accounts', issuer: 'https://login.example/realms/acme'}}},
@@ -160,23 +168,24 @@ check('selected nondefault identity uses only its OIDC and backup bindings', () 
 });
 check('selected deployment rejects mismatched identity, namespace, release, package and intent', () => {
   const v = base(); v.services.git = {}; v.deployments = {target: {instance: 'git', namespace: 'green', release: 'git-target', package: 'new'}};
-  v.packages = {new: {version: '0.2.3'}};
+  v.packages = {new: {version}};
   const opts = {deployment: 'target', release: 'git-target', namespace: 'green'};
   documents(render(v, opts));
   rejects(v, {...opts, namespace: 'blue'}); rejects(v, {...opts, release: 'wrong'});
   v.instance = 'forgejo'; rejects(v, opts); delete v.instance;
-  v.packages.new.version = '0.2.2'; rejects(v, opts); v.packages.new.version = '0.2.3';
+  v.packages.new.version = '0.0.0-incompatible'; rejects(v, opts); v.packages.new.version = version;
   delete v.services.git; rejects(v, opts); v.services.git = {};
-  v.operations = {deployments: {target: {replicas: 2}}}; rejects(v, opts);
+  v.operations = {deployments: {target: {replicas: 0}}}; rejects(v, opts);
   v.operations.deployments.target = {ingressEnabled: 'false'}; rejects(v, opts);
   v.operations.deployments.target = {version: '18.0.0'}; rejects(v, opts);
   v.operations.deployments.target = {hostname: 'https://bad.example'}; rejects(v, opts);
-  v.operations.deployments.target = {replicas: 0, ingressEnabled: false};
-  assert.equal(documents(render(v, opts)).find(d => d.kind === 'ForgejoApplication').spec.replicas, 0);
+  v.operations.deployments.target = {running: false}; rejects(v, opts);
+  v.operations.deployments.target = {ingressEnabled: false};
+  assert.equal(documents(render(v, opts)).find(d => d.kind === 'ForgejoApplication').spec.ingress.enabled, false);
 });
 check('strict selected interface rejects legacy inputs invalid types and unknown fields', () => {
-  for (const [key, value] of Object.entries({identity: {}, image: 'legacy', version: '17.0.1', claim: 'state', stagingClaim: 'stage', replicas: 1, ssh: {}, controller: {}})) { const v = base(); v[key] = value; rejects(v); }
-  for (const s of [false, [], 'invalid', {unknown: true}, {replicas: 0.5}, {replicas: 2}, {version: '18.0.0'}, {claims: {staging: 'forgejo-state'}}, {ingress: {enabled: 'false'}}, {controller: {image: 'mutable:latest'}}, {ssh: {port: 0}}, {hostname: 'https://invalid.example'}]) { const v = base(); v.services.forgejo = s; rejects(v); }
+  for (const [key, value] of Object.entries({identity: {}, image: 'legacy', version: '17.0.1', claim: 'state', stagingClaim: 'stage', running: false, replicas: 1, ssh: {}, controller: {}})) { const v = base(); v[key] = value; rejects(v); }
+  for (const s of [false, [], 'invalid', {unknown: true}, {running: false}, {running: true}, {replicas: 0}, {replicas: 1}, {version: '18.0.0'}, {claims: {staging: 'forgejo-state'}}, {ingress: {enabled: 'false'}}, {controller: {image: 'mutable:latest'}}, {ssh: {port: 0}}, {hostname: 'https://invalid.example'}]) { const v = base(); v.services.forgejo = s; rejects(v); }
   const v = base(); v.services.other = {invalid: true}; v.backup = {endpoints: {foreign: {unknown: true}}}; declaration(v); configuration(v); spec(v);
 });
 console.log(`PASS ${checks} chart behavior checks`);

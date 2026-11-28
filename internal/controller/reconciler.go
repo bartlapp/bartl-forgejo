@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha1"
+	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha2"
 	"github.com/robfig/cron/v3"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -64,9 +64,6 @@ func validate(a *api.ForgejoApplication) error {
 	}
 	if a.Spec.Version != "16.0.7" && a.Spec.Version != "17.0.1" {
 		return fmt.Errorf("unsupported version %q", a.Spec.Version)
-	}
-	if a.Spec.Replicas != 0 && a.Spec.Replicas != 1 {
-		return fmt.Errorf("replicas must be zero or one")
 	}
 	if a.Spec.Claim == "" || a.Spec.StagingClaim == "" || a.Spec.Claim == a.Spec.StagingClaim {
 		return fmt.Errorf("distinct existing state and staging claims required")
@@ -150,8 +147,33 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		controllerutil.AddFinalizer(a, finalizer)
 		return ctrl.Result{Requeue: true}, r.Update(ctx, a)
 	}
-	if !a.DeletionTimestamp.IsZero() || a.Spec.Replicas == 0 {
+	if !a.Spec.Running || !a.DeletionTimestamp.IsZero() {
+		// Withdraw writers and scheduled admission before observing finite work.
+		// Observation failure must retain its Job/Pod evidence, not keep serving.
+		if e := r.deployment(ctx, a, 0); e != nil {
+			return r.fail(ctx, a, e)
+		}
+		c := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "forgejo-backup", Namespace: a.Namespace}}
+		if e := r.deleteOwned(ctx, a, c); e != nil {
+			return r.fail(ctx, a, e)
+		}
+		condition(a, "Ready", metav1.ConditionFalse, "Stopping", "Serving stop requested; finite work and Pod drainage are not yet confirmed")
+		condition(a, "Stopped", metav1.ConditionFalse, "Draining", "Waiting for owned work and actual Pods to terminate")
+	}
+	// Persist bound completion before stop or changed intent can delete its Pod.
+	if consumed, e := r.completed(ctx, a); consumed || e != nil {
+		if e != nil && (!a.Spec.Running || !a.DeletionTimestamp.IsZero()) {
+			if _, saveErr := r.save(ctx, a); saveErr != nil {
+				return ctrl.Result{}, saveErr
+			}
+		}
+		return ctrl.Result{Requeue: true}, e
+	}
+	if !a.DeletionTimestamp.IsZero() {
 		return r.stop(ctx, a)
+	}
+	if !a.Spec.Running {
+		return r.stopped(ctx, a)
 	}
 	if e := validate(a); e != nil {
 		return r.fail(ctx, a, e)
@@ -161,15 +183,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// scale down the healthy predecessor merely because an incompatible edit was made.
 	if o := a.Status.Operation; o != nil && o.Kind == "publish" && o.Phase != "Succeeded" &&
 		(o.Claim != a.Spec.Claim || o.StagingClaim != a.Spec.StagingClaim || o.Version != a.Spec.Version) {
-		ready, e := r.ready(ctx, a)
-		if e != nil {
-			return ctrl.Result{}, e
-		}
-		if ready {
-			condition(a, "Ready", metav1.ConditionTrue, "NativeReady", "Existing service remains ready while publication is unresolved")
-		} else {
-			condition(a, "Ready", metav1.ConditionFalse, "Starting", "Waiting for native readiness")
-		}
+		condition(a, "Ready", metav1.ConditionFalse, "PendingPublication", "Desired claims or native version are not applied while protected publication is unresolved; existing service is left unchanged")
 		condition(a, "Failed", metav1.ConditionTrue, "PendingPublication", "Restore the operation's state claim, staging claim and version, then retry publication before changing them")
 		return r.save(ctx, a)
 	}
@@ -208,7 +222,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		return r.operation(ctx, a)
 	}
-	if o != nil && o.Phase == "Failed" && o.Kind != "publish" && o.Claim == a.Spec.Claim {
+	if o != nil && o.Phase == "Failed" && o.Kind != "publish" && !(o.Kind == "capture" && o.SourceIntact) && o.Claim == a.Spec.Claim {
 		return r.fail(ctx, a, fmt.Errorf("%s failed on this target: %s; use an independent clean claim", o.Kind, o.Message))
 	}
 	if a.Status.PreparedClaim != a.Spec.Claim || a.Status.PreparedVersion != a.Spec.Version {
@@ -318,6 +332,94 @@ func (r *Reconciler) drain(ctx context.Context, a *api.ForgejoApplication, all b
 	}
 	return true, nil
 }
+
+// Persist bound completion separately before a drain may delete its evidence.
+func (r *Reconciler) completed(ctx context.Context, a *api.ForgejoApplication) (bool, error) {
+	o := a.Status.Operation
+	if o == nil || o.Phase == "Draining" || o.Phase == "Succeeded" || o.Phase == "Failed" {
+		return false, nil
+	}
+	j := &batchv1.Job{}
+	if e := r.Reader.Get(ctx, client.ObjectKey{Namespace: a.Namespace, Name: jobName(o)}, j); e != nil {
+		if apierrors.IsNotFound(e) {
+			return false, nil
+		}
+		return false, e
+	}
+	if !metav1.IsControlledBy(j, a) || (o.JobCreated && string(j.UID) != o.JobUID) {
+		_, e := r.failOperation(ctx, a, fmt.Errorf("operation Job identity changed; refusing stale completion"))
+		return true, e
+	}
+	if !o.JobCreated {
+		o.JobCreated, o.JobUID = true, string(j.UID)
+		_, e := r.save(ctx, a)
+		return true, e
+	}
+	out, e := r.result(ctx, a, j, o.Kind)
+	if e != nil {
+		if out != nil && o.Kind == "capture" {
+			o.SourceIntact = out.SourceIntact
+		}
+		_, e = r.failOperation(ctx, a, e)
+		return true, e
+	}
+	if out == nil {
+		return false, nil
+	}
+	_, e = r.finish(ctx, a, out)
+	return true, e
+}
+
+func (r *Reconciler) stopped(ctx context.Context, a *api.ForgejoApplication) (ctrl.Result, error) {
+	condition(a, "Stopped", metav1.ConditionFalse, "Draining", "Waiting for stopped capture or owned work to finish")
+	condition(a, "Ready", metav1.ConditionFalse, "Stopped", "Application running intent is false")
+	c := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "forgejo-backup", Namespace: a.Namespace}}
+	if e := r.deployment(ctx, a, 0); e != nil {
+		return r.fail(ctx, a, e)
+	}
+	if e := r.deleteOwned(ctx, a, c); e != nil {
+		return r.fail(ctx, a, e)
+	}
+	o := a.Status.Operation
+	bound := o != nil && o.Claim == a.Spec.Claim && o.StagingClaim == a.Spec.StagingClaim && o.Version == a.Spec.Version
+	prepared := a.Status.PreparedClaim == a.Spec.Claim && a.Status.PreparedVersion == a.Spec.Version
+	request := a.Annotations[BackupRequest]
+	// Stop never initializes or migrates merely to fulfill a backup request.
+	if prepared && (o == nil || o.Phase == "Succeeded" || (o.Phase == "Failed" && (o.Kind == "publish" || o.SourceIntact))) &&
+		request != "" && request != a.Status.LastHandledBackupRequest {
+		if e := validate(a); e != nil {
+			return r.fail(ctx, a, e)
+		}
+		if a.Spec.Backup == nil {
+			a.Status.LastHandledBackupRequest = request
+			condition(a, "BackupFailed", metav1.ConditionTrue, "NotConfigured", "Backup request rejected: no backup repository configured")
+			return r.save(ctx, a)
+		}
+		if bound && o.Kind == "publish" && o.Phase == "Failed" {
+			o.Phase, o.Request, o.Generation = "Publishing", request, a.Generation
+			o.JobCreated, o.JobUID, o.Message = false, "", ""
+			return r.save(ctx, a)
+		}
+		if o != nil && o.Kind == "publish" && o.Phase == "Failed" {
+			return r.fail(ctx, a, fmt.Errorf("restore protected publication claims and version before retry"))
+		}
+		return r.begin(ctx, a, "capture", request)
+	}
+	if bound && prepared && (o.Kind == "capture" || o.Kind == "publish") && o.Phase != "Failed" && o.Phase != "Succeeded" {
+		if e := validate(a); e != nil {
+			return r.fail(ctx, a, e)
+		}
+		if e := r.inputs(ctx, a); e != nil {
+			return r.fail(ctx, a, e)
+		}
+		if e := r.network(ctx, a); e != nil {
+			return r.fail(ctx, a, e)
+		}
+		return r.operation(ctx, a)
+	}
+	return r.stop(ctx, a)
+}
+
 func (r *Reconciler) stop(ctx context.Context, a *api.ForgejoApplication) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(a, finalizer) {
 		return ctrl.Result{}, nil
@@ -346,9 +448,10 @@ func (r *Reconciler) stop(ctx context.Context, a *api.ForgejoApplication) (ctrl.
 	if o := a.Status.Operation; o != nil && o.Phase != "Succeeded" && o.Phase != "Failed" {
 		o.Phase = "Failed"
 		o.Message = "Operation interrupted by explicit stop"
-		if o.Kind == "publish" {
+		if o.Kind == "capture" || o.Kind == "publish" {
+			a.Status.LastHandledBackupRequest = o.Request
 			a.Status.Backup = &api.BackupResult{Request: o.Request, Operation: o.ID, Success: false, Message: o.Message, CompletedAt: metav1.Now()}
-			condition(a, "BackupFailed", metav1.ConditionTrue, "PublicationInterrupted", o.Message)
+			condition(a, "BackupFailed", metav1.ConditionTrue, "BackupInterrupted", o.Message)
 		}
 	}
 	condition(a, "Ready", metav1.ConditionFalse, "Stopped", "All application and operation Pods have terminated")
@@ -370,6 +473,7 @@ type workerResult struct {
 	Message      string `json:"message"`
 	Snapshot     string `json:"snapshot"`
 	Capture      string `json:"capture"`
+	SourceIntact bool   `json:"sourceIntact"`
 }
 
 func (r *Reconciler) result(ctx context.Context, a *api.ForgejoApplication, j *batchv1.Job, command string) (*workerResult, error) {
@@ -395,7 +499,7 @@ func (r *Reconciler) result(ctx context.Context, a *api.ForgejoApplication, j *b
 				return nil, fmt.Errorf("worker result identity mismatch")
 			}
 			if t.ExitCode != 0 || !out.Success {
-				return nil, fmt.Errorf("%s failed: %s", command, out.Message)
+				return &out, fmt.Errorf("%s failed: %s", command, out.Message)
 			}
 			if command == "capture" && out.Capture != o.ID {
 				return nil, fmt.Errorf("capture result is not bound to current operation")
@@ -429,7 +533,7 @@ func (r *Reconciler) operation(ctx context.Context, a *api.ForgejoApplication) (
 		return r.save(ctx, a)
 	}
 	command := o.Kind
-	if command == "publish" && a.Status.PreparedVersion == a.Spec.Version && a.Status.PreparedClaim == a.Spec.Claim {
+	if command == "publish" && a.Spec.Running && a.Status.PreparedVersion == a.Spec.Version && a.Status.PreparedClaim == a.Spec.Claim {
 		if e := r.deployment(ctx, a, 1); e != nil {
 			return ctrl.Result{}, e
 		}
@@ -454,6 +558,9 @@ func (r *Reconciler) operation(ctx context.Context, a *api.ForgejoApplication) (
 	}
 	result, e := r.result(ctx, a, j, command)
 	if e != nil {
+		if result != nil && command == "capture" {
+			o.SourceIntact = result.SourceIntact
+		}
 		return r.failOperation(ctx, a, e)
 	}
 	if result == nil {
@@ -462,6 +569,12 @@ func (r *Reconciler) operation(ctx context.Context, a *api.ForgejoApplication) (
 		}
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
+	return r.finish(ctx, a, result)
+}
+
+func (r *Reconciler) finish(ctx context.Context, a *api.ForgejoApplication, result *workerResult) (ctrl.Result, error) {
+	o := a.Status.Operation
+	command := o.Kind
 	o.Message = result.Message
 	switch command {
 	case "prepare":
@@ -474,7 +587,7 @@ func (r *Reconciler) operation(ctx context.Context, a *api.ForgejoApplication) (
 		o.Phase = "Publishing"
 		o.JobCreated = false
 		o.JobUID = ""
-		condition(a, "Ready", metav1.ConditionFalse, "Captured", "Consistent capture completed; resuming service while publishing")
+		condition(a, "Ready", metav1.ConditionFalse, "Captured", "Consistent capture completed; current runtime intent governs service resumption")
 	case "publish":
 		o.Phase = "Succeeded"
 		a.Status.LastHandledBackupRequest = o.Request
@@ -499,7 +612,7 @@ func (r *Reconciler) failOperation(ctx context.Context, a *api.ForgejoApplicatio
 		a.Status.LastHandledBackupRequest = o.Request
 		a.Status.Backup = &api.BackupResult{Request: o.Request, Operation: o.ID, Success: false, Message: e.Error(), CompletedAt: metav1.Now()}
 		condition(a, "BackupFailed", metav1.ConditionTrue, "BackupFailed", e.Error())
-		if o.Kind == "publish" {
+		if o.Kind == "publish" || o.SourceIntact {
 			return r.save(ctx, a)
 		}
 	}

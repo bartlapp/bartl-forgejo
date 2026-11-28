@@ -5,7 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha1"
+	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha2"
 	"github.com/floriankesslergmbh/bartl-forgejo/internal/controller"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -64,7 +64,7 @@ func requestBackup(ctx context.Context, c client.Client, namespace string, now t
 	if e := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "forgejo"}, a); e != nil {
 		return e
 	}
-	if !a.DeletionTimestamp.IsZero() || a.Spec.Replicas == 0 {
+	if !a.DeletionTimestamp.IsZero() || !a.Spec.Running {
 		return nil
 	}
 	// Do not replace an unhandled request; scheduling never drops a pending backup.

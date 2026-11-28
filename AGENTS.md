@@ -57,7 +57,7 @@ Setup waits for Keycloak's managed certificate and current-generation applicatio
 
 Create the synthetic identity through Keycloak's native user API after creating its realm, rather than embedding it in realm import. Native creation supplies the standard default-role grant needed for account security and MFA self-service; it does not grant realm administration.
 
-The proof supports a fresh cluster without a Forgejo CRD; its first Helm installation creates that definition. Missing-API detection must distinguish confirmed CRD absence from a failed Kubernetes observation, rather than requiring an undocumented pre-installation.
+The proof supports a fresh cluster without a Forgejo CRD: it installs the shipped definition, waits for Established and creates the full v1alpha2 Application with explicit running intent and Helm ownership metadata before Helm installation. Missing-API detection distinguishes confirmed CRD absence from failed observation. An older management API is refused, not migrated or adopted.
 
 For `acme.fke.systems`, first prepare the [isolated public-plus-staging CA bundle](../bartl-app/docs/reference-installation/README.md#prepare-test-client-trust) and supply its absolute path as `CLIENT_CA_BUNDLE`. Setup selects LE staging for all public fixture services and supplies native Forgejo client trust. Before setup, export `NODE_EXTRA_CA_CERTS="$CLIENT_CA_BUNDLE"`, `CURL_CA_BUNDLE="$CLIENT_CA_BUNDLE"` and `GIT_SSL_CAINFO="$CLIENT_CA_BUNDLE"`. Keep these exports confined to the qualification shell. The proof's combined bundle adds only its private fault-proxy CA; it does not modify system trust. Fresh real-browser OIDC acceptance with isolated staging trust remains a separate required check.
 
@@ -90,7 +90,7 @@ kubectl -n "$NS" get forgejoapplication/forgejo -o json |
   jq -e '.status.backup.success == true and .status.operation.phase == "Succeeded"'
 kubectl -n "$NS" patch forgejoapplication/forgejo --type=merge \
   --field-manager=kubectl-patch -p "$(jq -nc --arg repository "$REPOSITORY" \
-    '{spec:{replicas:1,ingress:{enabled:true},backup:{repository:$repository}}}')"
+    '{spec:{running:true,ingress:{enabled:true},backup:{repository:$repository}}}')"
 kubectl -n "$NS" wait forgejoapplication/forgejo --for=condition=Ready --timeout=10m
 ```
 
@@ -117,7 +117,7 @@ for slot in blue green; do
   kubectl -n "$NS" get forgejoapplication/forgejo -o json |
     jq -e '.status.backup.success == true and .status.operation.phase == "Succeeded"'
   kubectl -n "$NS" patch forgejoapplication/forgejo --type=merge \
-    --field-manager=kubectl-patch -p '{"spec":{"replicas":0,"ingress":{"enabled":false}}}'
+    --field-manager=kubectl-patch -p '{"spec":{"running":false}}'
   kubectl -n "$NS" wait forgejoapplication/forgejo --for=condition=Stopped --timeout=10m
   kubectl -n "$NS" get forgejoapplication/forgejo -o json |
     jq -e '.metadata.generation as $g | .status.observedGeneration == $g and

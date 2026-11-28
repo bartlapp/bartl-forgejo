@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha1"
+	api "github.com/floriankesslergmbh/bartl-forgejo/api/v1alpha2"
 	"github.com/floriankesslergmbh/bartl-forgejo/internal/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,7 +36,7 @@ func TestScheduledRequestPreservesConcurrentManualRequest(t *testing.T) {
 	if e := api.AddToScheme(s); e != nil {
 		t.Fatal(e)
 	}
-	a := &api.ForgejoApplication{ObjectMeta: metav1.ObjectMeta{Name: "forgejo", Namespace: "test"}, Spec: api.ForgejoApplicationSpec{Replicas: 1}}
+	a := &api.ForgejoApplication{ObjectMeta: metav1.ObjectMeta{Name: "forgejo", Namespace: "test"}, Spec: api.ForgejoApplicationSpec{Running: true}}
 	base := fake.NewClientBuilder().WithScheme(s).WithObjects(a).Build()
 	c := &concurrentRequestClient{Client: base}
 	if e := requestBackup(context.Background(), c, "test", time.Unix(100, 0)); e != nil {
@@ -56,7 +56,7 @@ func TestScheduledRequestDoesNotReplacePendingRequest(t *testing.T) {
 	if e := api.AddToScheme(s); e != nil {
 		t.Fatal(e)
 	}
-	a := &api.ForgejoApplication{ObjectMeta: metav1.ObjectMeta{Name: "forgejo", Namespace: "test", Annotations: map[string]string{controller.BackupRequest: "manual-pending"}}, Spec: api.ForgejoApplicationSpec{Replicas: 1}}
+	a := &api.ForgejoApplication{ObjectMeta: metav1.ObjectMeta{Name: "forgejo", Namespace: "test", Annotations: map[string]string{controller.BackupRequest: "manual-pending"}}, Spec: api.ForgejoApplicationSpec{Running: true}}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(a).Build()
 	if e := requestBackup(context.Background(), c, "test", time.Unix(100, 0)); e != nil {
 		t.Fatal(e)

@@ -3,7 +3,7 @@
 {{- $service := include "forgejo.service" . | fromYaml }}
 {{- $oidc := include "forgejo.oidc" (dict "root" . "service" $service) | fromYaml }}
 {{- $backup := include "forgejo.backup" (dict "root" . "service" $service) | fromYaml }}
-apiVersion: forgejo.bartl.sh/v1alpha1
+apiVersion: forgejo.bartl.sh/v1alpha2
 kind: ForgejoApplication
 metadata:
   name: forgejo
@@ -13,7 +13,6 @@ spec:
     installation: {{ .Values.installation | quote }}
     instance: {{ $selection.instance | quote }}
   version: {{ $service.version | quote }}
-  replicas: {{ $service.replicas }}
   claim: {{ $service.claims.state | quote }}
   stagingClaim: {{ $service.claims.staging | quote }}
   configurationSecret: {{ $service.configurationSecret | quote }}

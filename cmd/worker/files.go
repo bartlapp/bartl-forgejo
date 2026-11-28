@@ -225,26 +225,59 @@ func (w *worker) capture() error {
 	if s.Version != w.version {
 		return errors.New("capture version does not match state")
 	}
+	// Everything below reads the verified, gracefully stopped source and writes
+	// only staging. A capture failure here does not invalidate native state.
+	w.result.SourceIntact = true
 	final := filepath.Join(w.staging, "capture")
 	if present, e := exists(final); e != nil {
 		return e
 	} else if present {
 		return errors.New("protected capture already exists; refusing overwrite")
 	}
-	// A failed partial capture is retained too; no new operation may erase it.
-	partial := filepath.Join(w.staging, "capture-in-progress")
-	if e = os.Mkdir(partial, 0700); e != nil {
-		return e
-	}
+	// The atomic rename to capture is the protection boundary. An owned,
+	// uncommitted copy may be discarded only after independently verifying the
+	// current source; unknown or foreign staging is never adopted or removed.
 	before, e := inventory(w.data)
 	if e != nil {
 		return e
 	}
-	if e = copyTree(w.data, filepath.Join(partial, "state")); e != nil {
+	partial := filepath.Join(w.staging, "capture-in-progress")
+	if info, err := os.Lstat(partial); err == nil {
+		if !info.IsDir() {
+			return errors.New("partial capture is not an owned staging directory")
+		}
+		manifestPath := filepath.Join(partial, "manifest.json")
+		info, err = os.Lstat(manifestPath)
+		if err != nil {
+			return fmt.Errorf("partial capture ownership is unknown: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return errors.New("partial capture ownership manifest is not a regular file")
+		}
+		var previous manifest
+		if err = readJSON(manifestPath, &previous); err != nil {
+			return fmt.Errorf("partial capture ownership is unknown: %w", err)
+		}
+		if previous.identity != w.id || previous.Version != w.version || previous.Operation == "" || previous.Format != 1 {
+			return errors.New("partial capture does not belong to this application and native version")
+		}
+		if e = os.RemoveAll(partial); e != nil {
+			return e
+		}
+		if e = syncDir(w.staging); e != nil {
+			return e
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if e = os.Mkdir(partial, 0700); e != nil {
 		return e
 	}
 	pointState := state{w.id, w.version, w.operation}
 	if e = atomicJSON(filepath.Join(partial, "manifest.json"), manifest{pointState, 1, time.Now().UTC(), before}); e != nil {
+		return e
+	}
+	if e = copyTree(w.data, filepath.Join(partial, "state")); e != nil {
 		return e
 	}
 	if _, e = verifyPoint(partial, w.id); e != nil {

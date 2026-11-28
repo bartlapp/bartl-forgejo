@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -7,7 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var GroupVersion = schema.GroupVersion{Group: "forgejo.bartl.sh", Version: "v1alpha1"}
+var GroupVersion = schema.GroupVersion{Group: "forgejo.bartl.sh", Version: "v1alpha2"}
 var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 	s.AddKnownTypes(GroupVersion, &ForgejoApplication{}, &ForgejoApplicationList{})
 	metav1.AddToGroupVersion(s, GroupVersion)
@@ -38,7 +38,7 @@ type SSHSpec struct {
 type ForgejoApplicationSpec struct {
 	Identity            Identity    `json:"identity"`
 	Version             string      `json:"version"`
-	Replicas            int32       `json:"replicas"`
+	Running             bool        `json:"running"`
 	Claim               string      `json:"claim"`
 	StagingClaim        string      `json:"stagingClaim"`
 	ConfigurationSecret string      `json:"configurationSecret"`
@@ -59,6 +59,7 @@ type Operation struct {
 	Message      string `json:"message,omitempty"`
 	JobCreated   bool   `json:"jobCreated,omitempty"`
 	JobUID       string `json:"jobUID,omitempty"`
+	SourceIntact bool   `json:"sourceIntact,omitempty"`
 }
 type BackupResult struct {
 	Request     string      `json:"request,omitempty"`
