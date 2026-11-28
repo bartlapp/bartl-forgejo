@@ -11,14 +11,15 @@ const host = process.env.BARTL_FORGEJO_HOST;
 const targetHost = process.env.BARTL_FORGEJO_TARGET_HOST;
 const keycloakHost = process.env.BARTL_KEYCLOAK_HOST;
 const address = process.env.BARTL_LAB_IPV4;
+const publicBackupHost = process.env.BARTL_BACKUP_HOST;
 const clientCABundle = process.env.CLIENT_CA_BUNDLE;
-const staging = [host, targetHost, keycloakHost].some(name =>
+const staging = [host, targetHost, keycloakHost, publicBackupHost].some(name =>
   name === 'acme.fke.systems' || name?.endsWith('.acme.fke.systems'));
 const tls = staging ? { acmeServer: 'https://acme-staging-v02.api.letsencrypt.org/directory' } : {};
 const resticChart = join(root, 'bartl-restic-0.3.0.tgz');
 const keycloakChart = join(root, 'bartl-keycloak-0.8.0.tgz');
 const namespaces = ['forgejo-blue', 'forgejo-green', 'forgejo-empty', 'forgejo-backup', 'forgejo-keycloak'];
-const backendHost = 'backup-restic.forgejo-backup.svc.cluster.local';
+const backendHost = publicBackupHost || 'backup-restic.forgejo-backup.svc.cluster.local';
 const backupURL = `rest:https://${backendHost}/forgejo/`;
 let sequence = 0;
 const secret = () => randomBytes(32).toString('hex');
@@ -62,7 +63,7 @@ async function ready(namespace, resource, timeout = '30m') {
   }
 }
 async function dns() {
-  for (const name of [host, targetHost, keycloakHost]) {
+  for (const name of [host, targetHost, keycloakHost, ...(publicBackupHost ? [publicBackupHost] : [])]) {
     for (const resolver of ['ns1.desec.io', 'ns2.desec.org', '1.1.1.1', '8.8.8.8']) {
       const { out } = await command('dig', [`@${resolver}`, name, 'A', '+short']);
       if (out.toString().trim() !== address) throw new Error(`DNS ${name} on ${resolver} must resolve only to ${address}; wait for propagation`);
@@ -90,10 +91,14 @@ async function backend() {
   const dir = join(root, 'backup');
   await mkdir(dir, { mode: 0o700 });
   const path = name => join(dir, name);
-  await command('openssl', ['req', '-x509', '-newkey', 'rsa:3072', '-nodes', '-days', '14', '-subj', '/CN=Forgejo disposable lab CA', '-keyout', path('ca.key'), '-out', path('ca.crt'), '-addext', 'basicConstraints=critical,CA:TRUE']);
-  await command('openssl', ['req', '-new', '-newkey', 'rsa:3072', '-nodes', '-subj', `/CN=${backendHost}`, '-keyout', path('tls.key'), '-out', path('tls.csr')]);
-  await file(path('extensions'), `subjectAltName=DNS:${backendHost},DNS:backup-restic.forgejo-backup.svc\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n`);
-  await command('openssl', ['x509', '-req', '-in', path('tls.csr'), '-CA', path('ca.crt'), '-CAkey', path('ca.key'), '-CAcreateserial', '-days', '14', '-extfile', path('extensions'), '-out', path('tls.crt')]);
+  if (publicBackupHost) {
+    await file(path('ca.crt'), await readFile(clientCABundle));
+  } else {
+    await command('openssl', ['req', '-x509', '-newkey', 'rsa:3072', '-nodes', '-days', '14', '-subj', '/CN=Forgejo disposable lab CA', '-keyout', path('ca.key'), '-out', path('ca.crt'), '-addext', 'basicConstraints=critical,CA:TRUE']);
+    await command('openssl', ['req', '-new', '-newkey', 'rsa:3072', '-nodes', '-subj', `/CN=${backendHost}`, '-keyout', path('tls.key'), '-out', path('tls.csr')]);
+    await file(path('extensions'), `subjectAltName=DNS:${backendHost},DNS:backup-restic.forgejo-backup.svc\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n`);
+    await command('openssl', ['x509', '-req', '-in', path('tls.csr'), '-CA', path('ca.crt'), '-CAkey', path('ca.key'), '-CAcreateserial', '-days', '14', '-extfile', path('extensions'), '-out', path('tls.crt')]);
+  }
   const password = secret();
   await file(path('password'), password);
   let htpasswd = '';
@@ -110,16 +115,17 @@ async function backend() {
       data: Object.fromEntries(Object.entries(credentials[role]).map(([key, value]) => [key, Buffer.from(value).toString('base64')])) }, null, 2));
   }
   await pvc('forgejo-backup', 'repository', '15Gi');
-  await ksecret('forgejo-backup', 'repository-tls', { 'tls.crt': await readFile(path('tls.crt')), 'tls.key': await readFile(path('tls.key')) }, 'kubernetes.io/tls');
+  if (!publicBackupHost) await ksecret('forgejo-backup', 'repository-tls', { 'tls.crt': await readFile(path('tls.crt')), 'tls.key': await readFile(path('tls.key')) }, 'kubernetes.io/tls');
   await ksecret('forgejo-backup', 'forgejo-repository-auth', { htpasswd });
   await ksecret('forgejo-backup', 'repository-key', { password });
   await ksecret('forgejo-backup', 'repository-admin', credentials.admin);
   const values = { installation: 'forgejo-qualification', instance: 'restic', services: { restic: {
     release: '0.3.0', hostname: backendHost, replicas: 1, existingClaim: 'repository', tlsSecret: 'repository-tls',
-    tls: { managed: false }, ingress: { enabled: false },
+    tls: { managed: !!publicBackupHost, ...tls }, ingress: { enabled: !!publicBackupHost },
     repositories: [{ name: 'forgejo', authSecret: 'forgejo-repository-auth', passwordSecret: 'repository-key' }] } } };
   await file(path('values.json'), JSON.stringify(values, null, 2));
   await command('helm', ['upgrade', '--install', 'backup', resticChart, '-n', 'forgejo-backup', '-f', path('values.json'), '--wait=legacy', '--timeout=5m']);
+  if (publicBackupHost) await kubectl('-n', 'forgejo-backup', 'wait', 'certificate/repository-tls', '--for=condition=Ready', '--timeout=10m');
   await ready('forgejo-backup', 'resticapplication/backup-restic');
   return credentials;
 }
@@ -197,6 +203,9 @@ async function main() {
     value.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
   if (![host, targetHost, keycloakHost].every(hostname) || new Set([host, targetHost, keycloakHost]).size !== 3) {
     throw new Error('Set distinct valid BARTL_FORGEJO_HOST, BARTL_FORGEJO_TARGET_HOST and BARTL_KEYCLOAK_HOST DNS names');
+  }
+  if (publicBackupHost && (!hostname(publicBackupHost) || [host, targetHost, keycloakHost].includes(publicBackupHost) || !clientCABundle)) {
+    throw new Error('BARTL_BACKUP_HOST requires a distinct hostname and supplied client CA bundle');
   }
   if (!address || isIP(address) !== 4) throw new Error('Set BARTL_LAB_IPV4 to the disposable lab public IPv4 address');
   if (!isAbsolute(root)) throw new Error('LAB_QUALIFICATION_DIR must be an absolute remote path');

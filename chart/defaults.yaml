@@ -1,8 +1,6 @@
 version: "17.0.1"
 controller:
-  # Historical 0.2.3 image, not the 0.3.0-dev.1 candidate.
-  # build.sh replaces this pin in its retained chart with the actual built digest.
-  image: ghcr.io/bartlapp/bartl-forgejo-controller@sha256:0c1984715240d33820d21fd08903831cc8251bb1ea618cd4df0878665c36ea75
+  image: ghcr.io/bartlapp/bartl-forgejo-controller@sha256:af74372c9ffb5ac8fcde82313edc215ec39caad73dd5b5e96d257982a6db9669
   imagePullPolicy: IfNotPresent
   resources:
     requests:

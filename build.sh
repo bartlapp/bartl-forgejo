@@ -44,6 +44,7 @@ DIGEST=$(< "$OUT/image.digest")
 export PINNED_IMAGE="$IMAGE_REPOSITORY@$DIGEST"
 printf '%s\n' "$PINNED_IMAGE" > "$OUT/image-reference"
 cp -R "$SNAPSHOT/chart" "$OUT/chart"
+cp "$SNAPSHOT/LICENSE" "$SNAPSHOT/NOTICE" "$OUT/chart/"
 yq -i '.controller.image = strenv(PINNED_IMAGE)' "$OUT/chart/defaults.yaml"
 yq '{"services": {"forgejo": {"controller": {"image": .controller.image}}}}' "$OUT/chart/defaults.yaml" > "$OUT/image-values.yaml"
 helm package "$OUT/chart" --destination "$OUT"
