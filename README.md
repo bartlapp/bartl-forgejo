@@ -10,7 +10,7 @@ New deployment: follow the recipe below. Existing deployment: [resume access](#r
 
 ## Supported profile and release
 
-Candidate **0.3.0-dev.2** targets Linux amd64, Kubernetes 1.30+, one SQLite process and native Forgejo 16.0.7 or 17.0.1. Its corrected image is built and pinned; exact-artifact qualification and publication remain pending. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
+Candidate **0.3.0-dev.3** targets Linux amd64, Kubernetes 1.30+, one SQLite process and native Forgejo 16.0.7 or 17.0.1. Its corrected controller build, exact-artifact qualification and publication remain pending; the source pin identifies dev.2 until the new build is retained. The supported forward upgrade is **replacement from 16.0.7 to 17.0.1**. Native preparation owns initialization/reconstruction/migration; ordinary restart serves retained state without backup access. Failed/ambiguous mutation stays stopped; retry uses another independent empty target. Actions, mail, mirrors, federation and external webhooks are disabled. This planned-interruption profile does not implement provider-loss fencing.
 
 Supply the [operator tools](https://github.com/bartlapp/bartl-app/blob/main/docs/operator-workstation.md#check-the-workstation), an existing version-1 installation record with complete cluster/resource references and retained access, enforced NetworkPolicy, Traefik, cert-manager and state/staging/reconstruction capacity. [Base](https://github.com/bartlapp/base-k3s/blob/main/README.md) supplies a single-node profile; an equivalent cluster suffices. Compatible external OIDC/Restic services work without another Bartl package or company tooling.
 
@@ -28,7 +28,7 @@ umask 077
 kubectl --context "$KUBE_CONTEXT" get nodes,storageclass
 mkdir -p "$WORK_DIR/packages"
 CHART_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
-helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.3.0-dev.2 --untar --untardir "$CHART_STAGE"
+helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.3.0-dev.3 --untar --untardir "$CHART_STAGE"
 export PACKAGE_VERSION
 PACKAGE_VERSION=$(helm show chart "$CHART_STAGE/bartl-forgejo" | yq -er '.version')
 ```
@@ -672,7 +672,7 @@ Before interrupting the source, obtain the explicitly selected replacement candi
 export TARGET_PACKAGE=forgejo-replacement
 mkdir -p "$WORK_DIR/packages"
 TARGET_STAGE=$(mktemp -d "$WORK_DIR/packages/.forgejo.XXXXXX")
-helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.3.0-dev.2 --untar --untardir "$TARGET_STAGE"
+helm pull oci://ghcr.io/bartlapp/bartl-forgejo --version 0.3.0-dev.3 --untar --untardir "$TARGET_STAGE"
 export TARGET_PACKAGE_VERSION
 TARGET_PACKAGE_VERSION=$(helm show chart "$TARGET_STAGE/bartl-forgejo" | yq -er '.version')
 MATCHING_PACKAGE=$(yq -o=json '.packages // {}' "$VALUES" |

@@ -46,6 +46,34 @@ func requireNoWriters(t *testing.T, r *Reconciler, a *api.ForgejoApplication) {
 	}
 }
 
+func TestNativeRestartRequestSurvivesReconciliation(t *testing.T) {
+	for _, running := range []bool{true, false} {
+		a := application()
+		a.Spec.Running = running
+		a.Status.Operation = nil
+		r := controllerFixture(t, a, true)
+		d := &appsv1.Deployment{}
+		if e := r.Get(context.Background(), client.ObjectKeyFromObject(a), d); e != nil {
+			t.Fatal(e)
+		}
+		const restart = "2026-11-28T12:00:00Z"
+		d.Spec.Template.Annotations = map[string]string{"kubectl.kubernetes.io/restartedAt": restart}
+		if e := r.Update(context.Background(), d); e != nil {
+			t.Fatal(e)
+		}
+		a = reconcileApplication(t, r, a)
+		if e := r.Get(context.Background(), client.ObjectKeyFromObject(a), d); e != nil {
+			t.Fatal(e)
+		}
+		if d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] != restart {
+			t.Fatal("reconciliation erased the operator's native rollout request")
+		}
+		if !running {
+			requireNoWriters(t, r, a)
+		}
+	}
+}
+
 func TestAtomicFinalCaptureAndStoppedPublicationRetry(t *testing.T) {
 	a := application()
 	a.Spec.Running = false

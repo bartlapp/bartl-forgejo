@@ -99,7 +99,7 @@ func (r *Reconciler) deployment(ctx context.Context, a *api.ForgejoApplication, 
 	return r.owned(ctx, a, d, func() error {
 		p := r.pod(a, "serve")
 		p.RestartPolicy = corev1.RestartPolicyAlways
-		d.Spec = appsv1.DeploymentSpec{Replicas: &n, Selector: &metav1.LabelSelector{MatchLabels: labels(a, "app")}, Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels(a, "app")}, Spec: p}}
+		d.Spec = appsv1.DeploymentSpec{Replicas: &n, Selector: &metav1.LabelSelector{MatchLabels: labels(a, "app")}, Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels(a, "app"), Annotations: d.Spec.Template.Annotations}, Spec: p}}
 		return nil
 	})
 }
